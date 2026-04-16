@@ -6,17 +6,33 @@
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>LayoutConverter.App</RootNamespace>
     <AssemblyName>MovaCore</AssemblyName>
-    <!-- Native AOT settings -->
+    
     <PublishAot>true</PublishAot>
     <PublishTrimmed>true</PublishTrimmed>
-    <TrimMode>partial</TrimMode>
+    
+    <TrimMode>full</TrimMode>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <!-- Optimization for binary size -->
+    
     <OptimizationPreference>Size</OptimizationPreference>
     <StackTraceSupport>false</StackTraceSupport>
-    <InvariantGlobalization>false</InvariantGlobalization>
+    <InvariantGlobalization>true</InvariantGlobalization>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    
+    <DebuggerSupport>false</DebuggerSupport>
+    <EventSourceSupport>false</EventSourceSupport>
+    <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    
+    <Version>1.0.0</Version>
+    <Authors>cropsp</Authors>
+    <Description>Fast and polite keyboard layout converter for Windows</Description>
+    <Copyright>Copyright © 2026 cropsp</Copyright>
+    <PackageProjectUrl>https://github.com/cropsp/MovaCore</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/cropsp/MovaCore</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    
     <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
     <_SuppressWinFormsTrimError>true</_SuppressWinFormsTrimError>
   </PropertyGroup>
@@ -26,7 +42,6 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
   </ItemGroup>
   
-  <!-- Assets reference -->
   <ItemGroup>
     <None Update="Resources\mouse_icon.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
