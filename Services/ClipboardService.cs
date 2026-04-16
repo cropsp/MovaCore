@@ -1,4 +1,5 @@
 using System.Threading.Tasks;
+using System.Windows.Forms;
 
 namespace LayoutConverter.App.Services
 {
@@ -10,22 +11,21 @@ namespace LayoutConverter.App.Services
 
     public class ClipboardService : IClipboardService
     {
-        public async Task<string> GetTextAsync()
+        public Task<string> GetTextAsync()
         {
-            // WinUI 3 Specific Clipboard logic
-            var content = Microsoft.Windows.ApplicationModel.DataTransfer.Clipboard.GetContent();
-            if (content.Contains(Microsoft.Windows.ApplicationModel.DataTransfer.StandardDataFormats.Text))
+            if (Clipboard.ContainsText())
             {
-                return await content.GetTextAsync();
+                return Task.FromResult(Clipboard.GetText());
             }
-            return string.Empty;
+            return Task.FromResult(string.Empty);
         }
 
         public Task SetTextAsync(string text)
         {
-            var package = new Microsoft.Windows.ApplicationModel.DataTransfer.DataPackage();
-            package.SetText(text);
-            Microsoft.Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
+            if (!string.IsNullOrEmpty(text))
+            {
+                Clipboard.SetText(text);
+            }
             return Task.CompletedTask;
         }
     }

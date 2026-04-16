@@ -1,47 +1,45 @@
 # MovaCore
 
-**MovaCore** is a professional keyboard layout converter for Windows, built with .NET 8 and WinUI 3. It provides a seamless, global utility to fix text typed in the wrong layout with a single shortcut.
+**MovaCore** is a high-performance, ultra-lightweight keyboard layout converter for Windows, built on **.NET 8** using **Windows Forms** and optimized with **Native AOT**.
 
 ## ✨ Features
 
-- **Global Conversion**: Instantly fix text like "ghbdtn" into "привіт" anywhere in Windows.
-- **Modern UI**: Features a sleek, Fluent design with a **Mica backdrop** effect.
-- **Unpackaged Distribution**: Runs as a standard standalone `.exe` without requiring Microsoft Store installation.
-- **System Tray Integration**: Stays active in the background via the system tray, keeping your taskbar clean.
-- **Responsive Shortcut**: Triggers via `Alt + Q` for instant correction of selected text.
+- **Global Conversion**: Instantly fix text typed in the wrong layout (e.g., "ghbdtn" -> "привіт") anywhere in Windows.
+- **Smart Clipboard Polling**: Advanced synchronization logic ensures text is converted even in slow-to-respond applications.
+- **Ultra-Lightweight**: Native AOT compilation results in a single, standalone executable (~10 MB) with minimal memory footprint.
+- **Tray-First Design**: Runs silently in the system tray. Use the context menu to manage settings or exit.
+- **Global Hotkey**: Fast and reliable `Alt + Q` shortcut for instant correction.
 
-## 🛠 How It Works
+## 🛠 Tech Stack
 
-1. **Detection**: Select text in any application (Word, Browser, IDE, etc.).
-2. **Action**: Press `Alt + Q`.
-3. **Internal Process**:
-   - The app simulates `Ctrl+C` to grab the text.
-   - It performs the layout conversion (En <-> Ua) on the UI thread.
-   - It puts the new text back into the clipboard.
-   - It simulates `Ctrl+V` to replace the original text.
+- **Framework**: .NET 8 (Windows Forms).
+- **Optimization**: Native AOT (Ahead-of-Time compilation) for near-native performance and small size.
+- **Hooks**: SharpHook for global key monitoring.
+- **Architecture**: ApplicationContext-based tray lifecycle.
 
-## 📦 Installation & Build
+## 📦 Build & Publish
 
-### Requirements
-- **Windows 10/11**
-- **.NET 8 SDK** (for building)
+To build a standalone, Native AOT executable (no .NET runtime required on target):
 
-### Building a Standalone EXE
-This project is configured as an **Unpackaged** WinUI 3 application. To build a self-contained version that doesn't require the .NET Runtime on the target machine, run the following command:
-
-```bash
-dotnet publish -c Release -r win-x64 --self-contained true
+```powershell
+./publish.ps1
 ```
 
-**Note on Distribution**: Due to WinUI 3 architecture, the resulting `.exe` depends on several companion files (like `resources.pri` and DLLs). For distribution, it is recommended to **ZIP the entire publish folder** and provide it to users.
+Or manually:
+```bash
+dotnet publish -c Release -r win-x64
+```
+
+The output will be a single `MovaCore.exe` in the `publish` directory.
+
+## 📖 How to Use
+
+1. Launch `MovaCore.exe`.
+2. Look for the application icon in the system tray.
+3. Select any text typed in the wrong layout.
+4. Press **Alt + Q** to fix it instantly.
 
 ## 📜 Credits
 
-This project leverages the following open-source libraries:
-- [SharpHook](https://github.com/curiosity-ai/sharphook) - For global keyboard hooks and input simulation.
-- [H.NotifyIcon](https://github.com/HavenDV/H.NotifyIcon) - For advanced WinUI 3 system tray integration.
-- [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet) - For the MVVM architectural pattern.
-
-## 📝 License
-
-This project is licensed under the MIT License.
+- [SharpHook](https://github.com/curiosity-ai/sharphook) - Global keyboard hooks.
+- .NET Team - Native AOT and WinForms performance.

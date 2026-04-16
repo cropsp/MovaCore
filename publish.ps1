@@ -1,12 +1,11 @@
-# Publish Script for MovaCore
-# This script automates the creation of a self-contained, unpackaged build for Windows.
-# Note: WinUI 3 Unpackaged builds require the entire publish folder to be distributed (usually as a ZIP).
+# Publish Script for MovaCore (Native AOT)
+# This script automates the creation of a standalone, optimized Native AOT executable.
 
 $projectName = "MovaCore"
 $runtime = "win-x64"
 $configuration = "Release"
 
-Write-Host "🚀 Starting build process for $projectName..." -ForegroundColor Cyan
+Write-Host "🚀 Starting Native AOT build process for $projectName..." -ForegroundColor Cyan
 
 # Check if dotnet is installed
 if (-not (Get-Command "dotnet" -ErrorAction SilentlyContinue)) {
@@ -15,26 +14,15 @@ if (-not (Get-Command "dotnet" -ErrorAction SilentlyContinue)) {
 }
 
 # Run the publish command
-# -c Release: Build in release mode
-# -r win-x64: Target Windows 64-bit
-# --self-contained true: Include the .NET runtime in the output
-# -p:PublishSingleFile=true: Bundle everything into a single .exe
-# -p:WindowsPackageType=None: CRITICAL FOR WINUI 3 UNPACKAGED
-# -p:WindowsAppSDKSelfContained=true: CRITICAL FOR WINUI 3 UNPACKAGED
-# -p:PublishReadyToRun=true: Optimize for faster startup
+# Native AOT is enabled in the .csproj via <PublishAot>true</PublishAot>
 dotnet publish "$projectName.csproj" `
     -c $configuration `
-    -r $runtime `
-    --self-contained true `
-    -p:PublishSingleFile=true `
-    -p:WindowsPackageType=None `
-    -p:WindowsAppSDKSelfContained=true `
-    -p:PublishReadyToRun=true `
-    -p:PublishTrimmed=false
+    -r $runtime
 
 if ($LASTEXITCODE -eq 0) {
-    Write-Host "✅ Build completed successfully!" -ForegroundColor Green
-    Write-Host "📍 Output location: bin\$configuration\net8.0-windows10.0.19041.0\$runtime\publish\" -ForegroundColor Yellow
+    Write-Host "✅ Native AOT Build completed successfully!" -ForegroundColor Green
+    Write-Host "📍 Output location: bin\$configuration\net8.0-windows\$runtime\publish\" -ForegroundColor Yellow
+    Write-Host "📦 Your single executable MovaCore.exe is ready." -ForegroundColor Cyan
 } else {
     Write-Host "❌ Build failed. Please check the logs above." -ForegroundColor Red
 }
