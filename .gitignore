@@ -1,0 +1,32 @@
+# .NET
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+*.pdb
+*.user
+*.suo
+*.sln.docstates
+
+# Visual Studio
+.vs/
+*.user
+*.userosscache
+*.sln.docstates
+
+# WinUI 3 / Windows App SDK
+AppPackages/
+BundleArtifacts/
+_pkg/
+*.msix
+*.appx
+*.appxbundle
+*.msixbundle
+
+# SharpHook / Native
+*.dll
+*.so
+*.dylib
+
+# IDE
+.vscode/
+.idea/
