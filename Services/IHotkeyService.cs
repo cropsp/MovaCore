@@ -9,6 +9,7 @@ namespace LayoutConverter.App.Services
     {
         void Start();
         void Stop();
+        void SetTriggerKey(KeyCode key);
         event EventHandler HotkeyTriggered;
         void SimulateCopy();
         void SimulatePaste();
@@ -18,7 +19,8 @@ namespace LayoutConverter.App.Services
     {
         private readonly IGlobalHook _hook;
         private readonly EventSimulator _simulator;
-        private bool _isF10Down = false; // State tracking for auto-repeat protection
+        private bool _isTriggerKeyDown = false; 
+        private KeyCode _triggerKey = KeyCode.VcF10; // Default
 
         public event EventHandler HotkeyTriggered;
 
@@ -29,6 +31,11 @@ namespace LayoutConverter.App.Services
 
             _hook.KeyPressed += OnKeyPressed;
             _hook.KeyReleased += OnKeyReleased;
+        }
+
+        public void SetTriggerKey(KeyCode key)
+        {
+            _triggerKey = key;
         }
 
         public void Start()
@@ -43,26 +50,22 @@ namespace LayoutConverter.App.Services
 
         private void OnKeyPressed(object sender, KeyboardHookEventArgs e)
         {
-            // Хоткей: F10
-            if (e.Data.KeyCode == KeyCode.VcF10)
+            if (e.Data.KeyCode == _triggerKey)
             {
-                // Придушуємо подію завжди, щоб вона не потрапляла в систему (не відкривала меню)
                 e.SuppressEvent = true;
-                _isF10Down = true;
+                _isTriggerKeyDown = true;
             }
         }
 
         private void OnKeyReleased(object sender, KeyboardHookEventArgs e)
         {
-            if (e.Data.KeyCode == KeyCode.VcF10)
+            if (e.Data.KeyCode == _triggerKey)
             {
-                // Придушуємо і відпускання теж
                 e.SuppressEvent = true;
 
-                if (_isF10Down)
+                if (_isTriggerKeyDown)
                 {
-                    _isF10Down = false;
-                    // Тригеримо роботу ТІЛЬКИ коли клавішу відпущено
+                    _isTriggerKeyDown = false;
                     HotkeyTriggered?.Invoke(this, EventArgs.Empty);
                 }
             }
@@ -70,7 +73,6 @@ namespace LayoutConverter.App.Services
 
         private void ReleaseModifiers()
         {
-            // Примусово відпускаємо модифікатори
             _simulator.SimulateKeyRelease(KeyCode.VcLeftAlt);
             _simulator.SimulateKeyRelease(KeyCode.VcRightAlt);
             _simulator.SimulateKeyRelease(KeyCode.VcLeftShift);

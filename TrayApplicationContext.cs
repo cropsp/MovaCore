@@ -4,6 +4,8 @@ using System.IO;
 using System.Windows.Forms;
 using System.Threading.Tasks;
 using LayoutConverter.App.Services;
+using LayoutConverter.App.Models;
+using LayoutConverter.App.UI;
 
 namespace LayoutConverter.App
 {
@@ -12,6 +14,8 @@ namespace LayoutConverter.App
         private readonly NotifyIcon _notifyIcon;
         private readonly IHotkeyService _hotkeyService;
         private readonly HotkeyOrchestrator _orchestrator;
+        private readonly SettingsService _settingsService;
+        private AppSettings _currentSettings;
 
         public TrayApplicationContext(
             IHotkeyService hotkeyService,
@@ -19,16 +23,20 @@ namespace LayoutConverter.App
         {
             _hotkeyService = hotkeyService;
             _orchestrator = orchestrator;
+            _settingsService = new SettingsService();
+
+            // Load and apply settings
+            _currentSettings = _settingsService.LoadSettings();
+            ApplySettings();
 
             // Initialize NotifyIcon
             _notifyIcon = new NotifyIcon
             {
-                Text = "MovaCore - Layout Converter (F10)",
+                Text = "MovaCore - Layout Converter",
                 ContextMenuStrip = CreateContextMenu(),
                 Visible = true
             };
 
-            // Set Icon from Resources with proper scaling for tray
             SetApplicationIcon();
 
             // Subscribe to debug notifications
@@ -37,6 +45,11 @@ namespace LayoutConverter.App
             // Start Hotkey Service
             _hotkeyService.Start();
             _hotkeyService.HotkeyTriggered += OnHotkeyTriggered;
+        }
+
+        private void ApplySettings()
+        {
+            _hotkeyService.SetTriggerKey(_currentSettings.TriggerKey);
         }
 
         private void SetApplicationIcon()
@@ -48,13 +61,10 @@ namespace LayoutConverter.App
                 {
                     using (var bitmap = new Bitmap(iconPath))
                     {
-                        // Важливо: для системного трея картинка має бути 32x32
-                        // Якщо ми просто даємо велику картинку, Windows її жахливо стискає (утворюється "абракадабра")
                         using (var resizedIcon = new Bitmap(32, 32))
                         {
                             using (var g = Graphics.FromImage(resizedIcon))
                             {
-                                // Використовуємо найкращу якість згладжування
                                 g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
                                 g.DrawImage(bitmap, 0, 0, 32, 32);
                             }
@@ -77,7 +87,7 @@ namespace LayoutConverter.App
 
         private void OnConversionCompleted(object? sender, string message)
         {
-            if (!string.IsNullOrEmpty(message))
+            if (_currentSettings.ShowNotifications && !string.IsNullOrEmpty(message))
             {
                 _notifyIcon.ShowBalloonTip(3000, "MovaCore", message, ToolTipIcon.Info);
             }
@@ -101,7 +111,20 @@ namespace LayoutConverter.App
 
         private void ShowSettings()
         {
-            MessageBox.Show("MovaCore v1.0\nSettings will be available in the next update.", "MovaCore", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            using (var form = new SettingsForm(_currentSettings))
+            {
+                if (form.ShowDialog() == DialogResult.OK)
+                {
+                    _currentSettings = form.UpdatedSettings;
+                    _settingsService.SaveSettings(_currentSettings);
+                    ApplySettings();
+                    
+                    if (_currentSettings.ShowNotifications)
+                    {
+                        _notifyIcon.ShowBalloonTip(2000, "MovaCore", "Settings saved and applied successfully!", ToolTipIcon.Info);
+                    }
+                }
+            }
         }
 
         private void Exit()
