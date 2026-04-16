@@ -19,12 +19,16 @@ if (-not (Get-Command "dotnet" -ErrorAction SilentlyContinue)) {
 # -r win-x64: Target Windows 64-bit
 # --self-contained true: Include the .NET runtime in the output
 # -p:PublishSingleFile=true: Bundle everything into a single .exe
+# -p:WindowsPackageType=None: CRITICAL FOR WINUI 3 UNPACKAGED
+# -p:WindowsAppSDKSelfContained=true: CRITICAL FOR WINUI 3 UNPACKAGED
 # -p:PublishReadyToRun=true: Optimize for faster startup
 dotnet publish "$projectName.csproj" `
     -c $configuration `
     -r $runtime `
     --self-contained true `
     -p:PublishSingleFile=true `
+    -p:WindowsPackageType=None `
+    -p:WindowsAppSDKSelfContained=true `
     -p:PublishReadyToRun=true `
     -p:PublishTrimmed=false
 
