@@ -1,28 +1,43 @@
 # MovaCore
 
-**MovaCore** is a modern Windows application built with .NET 8 and WinUI 3 that allows you to instantly convert the keyboard layout of your text globally.
+**MovaCore** is a professional keyboard layout converter for Windows, built with .NET 8 and WinUI 3. It provides a seamless, global utility to fix text typed in the wrong layout with a single shortcut.
 
-## 🚀 Features
+## ✨ Features
 
-- **Global Layout Conversion**: Quickly fix text typed in the wrong layout (e.g., "ghbdtn" -> "привіт") anywhere in Windows.
-- **Global Hotkey**: Uses `Alt + Q` to trigger the conversion on selected text.
-- **System Tray Integration**: Runs minimized in the tray to stay out of your way.
-- **Modern Fluent UI**: Leverages the latest Windows App SDK for a premium look and feel.
-- **MVVM Architecture**: Clean and maintainable codebase using CommunityToolkit.Mvvm.
+- **Global Conversion**: Instantly fix text like "ghbdtn" into "привіт" anywhere in Windows.
+- **Modern UI**: Features a sleek, Fluent design with a **Mica backdrop** effect.
+- **System Tray Integration**: Stays active in the background via the system tray, keeping your taskbar clean.
+- **Responsive Shortcut**: Triggers via `Alt + Q` for instant correction of selected text.
 
-## 🛠 Tech Stack
+## 🛠 How It Works
 
-- **Framework**: .NET 8 / WinUI 3 (Windows App SDK)
-- **Hooks**: SharpHook for global key monitoring.
-- **UI Components**: H.NotifyIcon for tray integration.
-- **Architecture**: MVVM (Community Toolkit).
+1. **Detection**: Select text in any application (Word, Browser, IDE, etc.).
+2. **Action**: Press `Alt + Q`.
+3. **Internal Process**:
+   - The app simulates `Ctrl+C` to grab the text.
+   - It performs the layout conversion (En <-> Ua).
+   - It puts the new text back into the clipboard.
+   - It simulates `Ctrl+V` to replace the original text.
 
-## 📖 How to Use
+## 📦 Installation & Build
 
-1. Run the application.
-2. Select text that was typed in the wrong layout.
-3. Press `Alt + Q`.
-4. The text will be replaced with the converted version automatically.
+### Requirements
+- **Windows 10/11**
+- **.NET 8 SDK** (for building)
+
+### Building from Source
+To build a standalone (self-contained) version that does not require the .NET Runtime on the target machine:
+
+```bash
+dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=true
+```
+
+## 📜 Credits
+
+This project leverages the following open-source libraries:
+- [SharpHook](https://github.com/curiosity-ai/sharphook) - For global keyboard hooks and input simulation.
+- [H.NotifyIcon](https://github.com/HavenDV/H.NotifyIcon) - For advanced WinUI 3 system tray integration.
+- [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet) - For the MVVM architectural pattern.
 
 ## 📝 License
 
