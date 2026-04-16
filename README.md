@@ -6,6 +6,7 @@
 
 - **Global Conversion**: Instantly fix text like "ghbdtn" into "привіт" anywhere in Windows.
 - **Modern UI**: Features a sleek, Fluent design with a **Mica backdrop** effect.
+- **Unpackaged Distribution**: Runs as a standard standalone `.exe` without requiring Microsoft Store installation.
 - **System Tray Integration**: Stays active in the background via the system tray, keeping your taskbar clean.
 - **Responsive Shortcut**: Triggers via `Alt + Q` for instant correction of selected text.
 
@@ -15,7 +16,7 @@
 2. **Action**: Press `Alt + Q`.
 3. **Internal Process**:
    - The app simulates `Ctrl+C` to grab the text.
-   - It performs the layout conversion (En <-> Ua).
+   - It performs the layout conversion (En <-> Ua) on the UI thread.
    - It puts the new text back into the clipboard.
    - It simulates `Ctrl+V` to replace the original text.
 
@@ -25,12 +26,14 @@
 - **Windows 10/11**
 - **.NET 8 SDK** (for building)
 
-### Building from Source
-To build a standalone (self-contained) version that does not require the .NET Runtime on the target machine:
+### Building a Standalone EXE
+This project is configured as an **Unpackaged** WinUI 3 application. To build a self-contained version that doesn't require the .NET Runtime on the target machine, run the following command:
 
 ```bash
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishReadyToRun=true
+dotnet publish -c Release -r win-x64 --self-contained true
 ```
+
+**Note on Distribution**: Due to WinUI 3 architecture, the resulting `.exe` depends on several companion files (like `resources.pri` and DLLs). For distribution, it is recommended to **ZIP the entire publish folder** and provide it to users.
 
 ## 📜 Credits
 

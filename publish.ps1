@@ -1,7 +1,8 @@
 # Publish Script for MovaCore
-# This script automates the creation of a self-contained, single-file executable for Windows.
+# This script automates the creation of a self-contained, unpackaged build for Windows.
+# Note: WinUI 3 Unpackaged builds require the entire publish folder to be distributed (usually as a ZIP).
 
-$projectName = "LayoutConverter.App"
+$projectName = "MovaCore"
 $runtime = "win-x64"
 $configuration = "Release"
 
