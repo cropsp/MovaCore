@@ -41,7 +41,6 @@ namespace LayoutConverter.App
 
             // ViewModels
             services.AddSingleton<MainViewModel>();
-            services.AddTransient<SettingsViewModel>();
 
             // Windows
             services.AddTransient<MainWindow>();
