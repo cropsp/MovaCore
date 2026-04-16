@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using SharpHook;
 using SharpHook.Native;
 
@@ -17,7 +18,7 @@ namespace LayoutConverter.App.Services
     {
         private readonly IGlobalHook _hook;
         private readonly EventSimulator _simulator;
-        private bool _isAltPressed;
+        private bool _isF10Down = false; // State tracking for auto-repeat protection
 
         public event EventHandler HotkeyTriggered;
 
@@ -42,40 +43,67 @@ namespace LayoutConverter.App.Services
 
         private void OnKeyPressed(object sender, KeyboardHookEventArgs e)
         {
-            // Відслідковуємо затиснення Alt
-            if (e.Data.KeyCode == KeyCode.VcLeftAlt || e.Data.KeyCode == KeyCode.VcRightAlt)
+            // Хоткей: F10
+            if (e.Data.KeyCode == KeyCode.VcF10)
             {
-                _isAltPressed = true;
-            }
-
-            // Хоткей: Alt + Q 
-            if (_isAltPressed && e.Data.KeyCode == KeyCode.VcQ)
-            {
-                HotkeyTriggered?.Invoke(this, EventArgs.Empty);
+                // Придушуємо подію завжди, щоб вона не потрапляла в систему (не відкривала меню)
+                e.SuppressEvent = true;
+                _isF10Down = true;
             }
         }
 
         private void OnKeyReleased(object sender, KeyboardHookEventArgs e)
         {
-            if (e.Data.KeyCode == KeyCode.VcLeftAlt || e.Data.KeyCode == KeyCode.VcRightAlt)
+            if (e.Data.KeyCode == KeyCode.VcF10)
             {
-                _isAltPressed = false;
+                // Придушуємо і відпускання теж
+                e.SuppressEvent = true;
+
+                if (_isF10Down)
+                {
+                    _isF10Down = false;
+                    // Тригеримо роботу ТІЛЬКИ коли клавішу відпущено
+                    HotkeyTriggered?.Invoke(this, EventArgs.Empty);
+                }
             }
+        }
+
+        private void ReleaseModifiers()
+        {
+            // Примусово відпускаємо модифікатори
+            _simulator.SimulateKeyRelease(KeyCode.VcLeftAlt);
+            _simulator.SimulateKeyRelease(KeyCode.VcRightAlt);
+            _simulator.SimulateKeyRelease(KeyCode.VcLeftShift);
+            _simulator.SimulateKeyRelease(KeyCode.VcRightShift);
+            _simulator.SimulateKeyRelease(KeyCode.VcLeftMeta);
+            _simulator.SimulateKeyRelease(KeyCode.VcRightMeta);
+            
+            Thread.Sleep(20);
         }
 
         public void SimulateCopy()
         {
+            ReleaseModifiers();
+
             _simulator.SimulateKeyPress(KeyCode.VcLeftControl);
+            Thread.Sleep(25);
             _simulator.SimulateKeyPress(KeyCode.VcC);
+            Thread.Sleep(25);
             _simulator.SimulateKeyRelease(KeyCode.VcC);
+            Thread.Sleep(25);
             _simulator.SimulateKeyRelease(KeyCode.VcLeftControl);
         }
 
         public void SimulatePaste()
         {
+            ReleaseModifiers();
+
             _simulator.SimulateKeyPress(KeyCode.VcLeftControl);
+            Thread.Sleep(25);
             _simulator.SimulateKeyPress(KeyCode.VcV);
+            Thread.Sleep(25);
             _simulator.SimulateKeyRelease(KeyCode.VcV);
+            Thread.Sleep(25);
             _simulator.SimulateKeyRelease(KeyCode.VcLeftControl);
         }
 

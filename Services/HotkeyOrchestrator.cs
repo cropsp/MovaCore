@@ -10,6 +10,10 @@ namespace LayoutConverter.App.Services
         private readonly IHotkeyService _hotkeyService;
         private readonly ILayoutConverterService _converterService;
         private readonly IClipboardService _clipboardService;
+        
+        private bool _isProcessing = false;
+
+        public event EventHandler<string> ConversionCompleted;
 
         public HotkeyOrchestrator(
             IHotkeyService hotkeyService,
@@ -21,53 +25,55 @@ namespace LayoutConverter.App.Services
             _clipboardService = clipboardService;
         }
 
-        public async void ExecuteConversionAsync()
+        public async Task ExecuteConversionAsync()
         {
+            if (_isProcessing) return;
+            _isProcessing = true;
+
             try
             {
-                // 1. Snapshot current clipboard content
-                string snapshot = await _clipboardService.GetTextAsync();
+                // 1. Clear
+                await _clipboardService.SetTextAsync("");
+                await Task.Delay(50); 
 
-                // 2. Simulate Ctrl + C to copy selected text
+                // 2. Simulate Copy
                 _hotkeyService.SimulateCopy();
 
-                // 3. Smart Clipboard Polling
-                // Loop for max 300ms, checking every 30ms for content change
-                string newContent = snapshot;
+                // 3. Polling
+                string capturedText = "";
                 Stopwatch sw = Stopwatch.StartNew();
                 
-                while (sw.ElapsedMilliseconds < 300)
+                while (sw.ElapsedMilliseconds < 1000) 
                 {
-                    await Task.Delay(30);
-                    newContent = await _clipboardService.GetTextAsync();
+                    await Task.Delay(50); 
+                    capturedText = await _clipboardService.GetTextAsync();
                     
-                    if (newContent != snapshot)
+                    if (!string.IsNullOrWhiteSpace(capturedText))
                     {
-                        break; // Content changed!
+                        break;
                     }
                 }
 
-                // 4. Proceed with conversion if we have text (even if it didn't change, we try)
-                if (!string.IsNullOrEmpty(newContent))
+                if (!string.IsNullOrWhiteSpace(capturedText))
                 {
-                    // 5. Convert and update clipboard
-                    string converted = await _converterService.ConvertAsync(newContent);
+                    string converted = await _converterService.ConvertAsync(capturedText);
                     
-                    if (converted != newContent)
+                    if (converted != capturedText)
                     {
                         await _clipboardService.SetTextAsync(converted);
-                        
-                        // Wait a tiny bit for the OS to accept the new clipboard
-                        await Task.Delay(50);
-                        
-                        // 6. Simulate Ctrl + V to paste the converted text
+                        await Task.Delay(50); 
                         _hotkeyService.SimulatePaste();
                     }
                 }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Conversion error: {ex.Message}");
+                // Keep errors for troubleshooting
+                ConversionCompleted?.Invoke(this, $"System Error: {ex.Message}");
+            }
+            finally
+            {
+                _isProcessing = false;
             }
         }
     }

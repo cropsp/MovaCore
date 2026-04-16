@@ -1,45 +1,57 @@
-# MovaCore
+# MovaCore 🐭
 
-**MovaCore** is a high-performance, ultra-lightweight keyboard layout converter for Windows, built on **.NET 8** using **Windows Forms** and optimized with **Native AOT**.
+<p align="center">
+  <img src="Resources/mouse_icon.png" width="128" alt="MovaCore Mascot">
+</p>
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Platform: Windows](https://img.shields.io/badge/Platform-Windows-blue.svg)](https://www.microsoft.com/windows)
+
+**MovaCore** is a lightweight, blazing-fast, and "polite" keyboard layout converter for Windows. 
+Born from the need to seamlessly switch text between English and Ukrainian (and vice versa) without the mess of standard clipboard tools.
+
+---
 
 ## ✨ Features
 
-- **Global Conversion**: Instantly fix text typed in the wrong layout (e.g., "ghbdtn" -> "привіт") anywhere in Windows.
-- **Smart Clipboard Polling**: Advanced synchronization logic ensures text is converted even in slow-to-respond applications.
-- **Ultra-Lightweight**: Native AOT compilation results in a single, standalone executable (~10 MB) with minimal memory footprint.
-- **Tray-First Design**: Runs silently in the system tray. Use the context menu to manage settings or exit.
-- **Global Hotkey**: Fast and reliable `Alt + Q` shortcut for instant correction.
+- **Blazing Fast:** Built with **C# 8.0 & Native AOT**, ensuring instant startup and zero dependencies.
+- **"Polite" Clipboard Handling:** Uses raw **Win32 P/Invoke** instead of high-level wrappers, overcoming common "Access Denied" or "COM Interop" issues.
+- **Smart Retries:** Automatically handles clipboard locks from other applications (like Telegram or Browsers).
+- **Architecture:** 
+  - Non-blocking keyboard hooks via **SharpHook**.
+  - Background task orchestration to ensure your input never lags.
+- **Minimalist UI:** Sits quietly in your system tray with a cute field mouse mascot.
+
+---
+
+## 🚀 Getting Started
+
+### Hotkeys
+- **F10 (Release):** Highlighting a text and tapping F10 will instantly convert it to the other language layout (e.g., `ghbdtn` -> `привіт`).
+
+### Installation
+1. Download the latest `MovaCore.exe` from the [Releases](https://github.com/yourusername/MovaCore/releases) page.
+2. Run as **Administrator** (recommended for access to clipboard in all apps).
+3. Find the mouse icon in your system tray.
+
+---
 
 ## 🛠 Tech Stack
+- **Runtime:** .NET 8.0 (Native AOT)
+- **Hooks:** [SharpHook](https://github.com/tolik-punko/SharpHook)
+- **Core Logic:** Win32 P/Invoke for Clipboard management.
+- **UI:** WinForms (System Tray)
 
-- **Framework**: .NET 8 (Windows Forms).
-- **Optimization**: Native AOT (Ahead-of-Time compilation) for near-native performance and small size.
-- **Hooks**: SharpHook for global key monitoring.
-- **Architecture**: ApplicationContext-based tray lifecycle.
+---
 
-## 📦 Build & Publish
+## 🐭 Why the Mouse?
+Like a field mouse, **MovaCore** is small, quiet, and very fast at moving "seeds" (your text) from one place to another.
 
-To build a standalone, Native AOT executable (no .NET runtime required on target):
+---
 
-```powershell
-./publish.ps1
-```
+## 📜 License
+Published under the [MIT License](LICENSE).
 
-Or manually:
-```bash
-dotnet publish -c Release -r win-x64
-```
+---
 
-The output will be a single `MovaCore.exe` in the `publish` directory.
-
-## 📖 How to Use
-
-1. Launch `MovaCore.exe`.
-2. Look for the application icon in the system tray.
-3. Select any text typed in the wrong layout.
-4. Press **Alt + Q** to fix it instantly.
-
-## 📜 Credits
-
-- [SharpHook](https://github.com/curiosity-ai/sharphook) - Global keyboard hooks.
-- .NET Team - Native AOT and WinForms performance.
+Developed with ❤️ and AI pairing.
