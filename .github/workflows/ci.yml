@@ -101,7 +101,7 @@ jobs:
           if ($p.ExitCode -eq 0) { throw 'Expected a failure without uiohook.dll' }
           if (-not (Select-String -Path $log -Pattern 'uiohook.dll was not found' -Quiet)) { throw 'Missing-DLL error was not logged' }
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: MovaCore-${{ matrix.rid }}
           path: |
@@ -118,7 +118,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           path: artifacts
 
