@@ -14,7 +14,7 @@ Born from the need to seamlessly switch text between English and Ukrainian (and 
 
 ## ✨ Features
 
-- **Blazing Fast:** Built with **C# 8.0 & Native AOT**, ensuring instant startup and zero dependencies.
+- **Blazing Fast:** Built with **.NET 8 & Native AOT**, ensuring instant startup and zero dependencies.
 - **"Polite" Clipboard Handling:** Uses raw **Win32 P/Invoke** instead of high-level wrappers, overcoming common "Access Denied" or "COM Interop" issues.
 - **Smart Retries:** Automatically handles clipboard locks from other applications (like Telegram or Browsers).
 - **Architecture:** 
@@ -27,18 +27,21 @@ Born from the need to seamlessly switch text between English and Ukrainian (and 
 ## 🚀 Getting Started
 
 ### Hotkeys
-- **F10 (Release):** Highlighting a text and tapping F10 will instantly convert it to the other language layout (e.g., `ghbdtn` -> `привіт`).
+- **F10 (default, fires on key release):** Highlight text and tap F10 to convert it to the other layout (e.g., `ghbdsn` -> `привіт`, `Руддщ` -> `Hello`). The hotkey can be changed in **Settings** (right-click the tray icon).
 
 ### Installation
-1. Download the latest `MovaCore.exe` from the [Releases](https://github.com/yourusername/MovaCore/releases) page.
-2. Run as **Administrator** (recommended for access to clipboard in all apps).
+1. Download the latest `MovaCore.exe` from the [Releases](https://github.com/cropsp/MovaCore/releases) page.
+2. Run `MovaCore.exe` — no installation or administrator rights required. Only one instance runs at a time.
 3. Find the mouse icon in your system tray.
+
+> **Note:** Windows does not let a regular app read keystrokes from, or send input to, windows running as administrator.
+> To convert text in elevated apps, start MovaCore as administrator too. "Launch at Windows startup" always starts it without elevation.
 
 ---
 
 ## 🛠 Tech Stack
 - **Runtime:** .NET 8.0 (Native AOT)
-- **Hooks:** [SharpHook](https://github.com/tolik-punko/SharpHook)
+- **Hooks:** [SharpHook](https://github.com/TolikPylypchuk/SharpHook)
 - **Core Logic:** Win32 P/Invoke for Clipboard management.
 - **UI:** WinForms (System Tray)
 

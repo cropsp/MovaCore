@@ -8,8 +8,20 @@ namespace LayoutConverter.App.Services
 {
     public interface IClipboardService
     {
-        Task<string> GetTextAsync();
-        Task SetTextAsync(string text);
+        /// <summary>
+        /// Changes whenever any application writes to or empties the clipboard. Does not open the clipboard.
+        /// </summary>
+        uint GetSequenceNumber();
+
+        /// <summary>
+        /// Returns the clipboard text, or null if the clipboard holds no text or stays locked by another application.
+        /// </summary>
+        Task<string?> TryGetTextAsync();
+
+        /// <summary>
+        /// Returns false if the clipboard stays locked by another application or Windows rejects the data.
+        /// </summary>
+        Task<bool> TrySetTextAsync(string text);
     }
 
     /// <summary>
@@ -33,6 +45,9 @@ namespace LayoutConverter.App.Services
         [DllImport("user32.dll", SetLastError = true)]
         static extern IntPtr SetClipboardData(uint uFormat, IntPtr hMem);
 
+        [DllImport("user32.dll")]
+        static extern uint GetClipboardSequenceNumber();
+
         [DllImport("kernel32.dll", SetLastError = true)]
         static extern IntPtr GlobalLock(IntPtr hMem);
 
@@ -43,100 +58,103 @@ namespace LayoutConverter.App.Services
         static extern IntPtr GlobalAlloc(uint uFlags, UIntPtr dwBytes);
 
         [DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr GlobalFree(IntPtr hMem);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
         static extern UIntPtr GlobalSize(IntPtr hMem);
 
         const uint CF_UNICODETEXT = 13;
         const uint GMEM_MOVEABLE = 0x0002;
 
-        public Task<string> GetTextAsync()
+        // Близько 1 секунди, щоб дочекатися, поки інша програма відпустить буфер
+        const int OpenAttempts = 20;
+        const int OpenRetryDelayMs = 50;
+
+        public uint GetSequenceNumber() => GetClipboardSequenceNumber();
+
+        public Task<string?> TryGetTextAsync()
         {
-            return Task.Run(() =>
+            return Task.Run<string?>(() =>
             {
-                string result = string.Empty;
+                if (!TryOpenClipboard()) return null;
 
-                // Робимо до 20 спроб (близько 1 секунди), щоб пробити замок
-                for (int i = 0; i < 20; i++)
+                try
                 {
-                    if (OpenClipboard(IntPtr.Zero))
-                    {
-                        try
-                        {
-                            IntPtr hGlobal = GetClipboardData(CF_UNICODETEXT);
-                            if (hGlobal != IntPtr.Zero)
-                            {
-                                IntPtr pGlobal = GlobalLock(hGlobal);
-                                if (pGlobal != IntPtr.Zero)
-                                {
-                                    try
-                                    {
-                                        result = Marshal.PtrToStringUni(pGlobal);
-                                    }
-                                    finally
-                                    {
-                                        GlobalUnlock(hGlobal);
-                                    }
-                                }
-                            }
-                            
-                            // Якщо ми отримали текст, виходимо
-                            if (!string.IsNullOrEmpty(result)) break;
-                        }
-                        finally
-                        {
-                            CloseClipboard();
-                        }
-                    }
-                    
-                    // Якщо буфер зайнятий - чекаємо 50мс
-                    Thread.Sleep(50);
-                }
+                    IntPtr hGlobal = GetClipboardData(CF_UNICODETEXT);
+                    if (hGlobal == IntPtr.Zero) return null; // у буфері не текст (зображення, файли тощо)
 
-                return result ?? string.Empty;
+                    IntPtr pGlobal = GlobalLock(hGlobal);
+                    if (pGlobal == IntPtr.Zero) return null;
+
+                    try
+                    {
+                        // Не покладаємося на завершальний '\0': читаємо не більше за розмір блоку
+                        int maxChars = (int)((ulong)GlobalSize(hGlobal) / sizeof(char));
+                        string text = Marshal.PtrToStringUni(pGlobal, maxChars);
+                        int terminator = text.IndexOf('\0');
+                        return terminator >= 0 ? text.Substring(0, terminator) : text;
+                    }
+                    finally
+                    {
+                        GlobalUnlock(hGlobal);
+                    }
+                }
+                finally
+                {
+                    CloseClipboard();
+                }
             });
         }
 
-        public Task SetTextAsync(string text)
+        public Task<bool> TrySetTextAsync(string text)
         {
             return Task.Run(() =>
             {
-                if (string.IsNullOrEmpty(text)) text = string.Empty;
+                if (!TryOpenClipboard()) return false;
 
-                for (int i = 0; i < 10; i++)
+                try
                 {
-                    if (OpenClipboard(IntPtr.Zero))
-                    {
-                        try
-                        {
-                            EmptyClipboard();
+                    if (!EmptyClipboard()) return false;
 
-                            if (text.Length > 0)
-                            {
-                                byte[] bytes = Encoding.Unicode.GetBytes(text + '\0');
-                                IntPtr hGlobal = GlobalAlloc(GMEM_MOVEABLE, (UIntPtr)bytes.Length);
-                                if (hGlobal != IntPtr.Zero)
-                                {
-                                    IntPtr pGlobal = GlobalLock(hGlobal);
-                                    if (pGlobal != IntPtr.Zero)
-                                    {
-                                        Marshal.Copy(bytes, 0, pGlobal, bytes.Length);
-                                        GlobalUnlock(hGlobal);
-                                        if (SetClipboardData(CF_UNICODETEXT, hGlobal) == IntPtr.Zero)
-                                        {
-                                            // В разі помилки Marshal.FreeHGlobal не потрібен для GMEM_MOVEABLE
-                                        }
-                                    }
-                                }
-                            }
-                            break; // Успіх
-                        }
-                        finally
-                        {
-                            CloseClipboard();
-                        }
+                    byte[] bytes = Encoding.Unicode.GetBytes(text + '\0');
+                    IntPtr hGlobal = GlobalAlloc(GMEM_MOVEABLE, (UIntPtr)bytes.Length);
+                    if (hGlobal == IntPtr.Zero) return false;
+
+                    IntPtr pGlobal = GlobalLock(hGlobal);
+                    if (pGlobal == IntPtr.Zero)
+                    {
+                        GlobalFree(hGlobal);
+                        return false;
                     }
-                    Thread.Sleep(50);
+
+                    Marshal.Copy(bytes, 0, pGlobal, bytes.Length);
+                    GlobalUnlock(hGlobal);
+
+                    // Після успішного SetClipboardData пам'ять належить системі, інакше звільняємо її самі
+                    if (SetClipboardData(CF_UNICODETEXT, hGlobal) == IntPtr.Zero)
+                    {
+                        GlobalFree(hGlobal);
+                        return false;
+                    }
+
+                    return true;
+                }
+                finally
+                {
+                    CloseClipboard();
                 }
             });
+        }
+
+        private static bool TryOpenClipboard()
+        {
+            // Буфер може бути ненадовго зайнятий іншою програмою (Telegram, браузери, менеджери буфера)
+            for (int i = 0; i < OpenAttempts; i++)
+            {
+                if (OpenClipboard(IntPtr.Zero)) return true;
+                Thread.Sleep(OpenRetryDelayMs);
+            }
+            return false;
         }
     }
 }

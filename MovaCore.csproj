@@ -11,6 +11,8 @@
     <PublishTrimmed>true</PublishTrimmed>
     
     <TrimMode>full</TrimMode>
+    <!-- tests/ has its own project; keep its sources and obj/ out of the app's default globs -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);tests/**</DefaultItemExcludes>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     
