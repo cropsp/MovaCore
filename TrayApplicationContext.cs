@@ -1,10 +1,9 @@
 using System;
 using System.Drawing;
-using System.IO;
-using System.Windows.Forms;
 using System.Threading.Tasks;
-using LayoutConverter.App.Services;
+using System.Windows.Forms;
 using LayoutConverter.App.Models;
+using LayoutConverter.App.Services;
 using LayoutConverter.App.UI;
 
 namespace LayoutConverter.App
@@ -12,6 +11,7 @@ namespace LayoutConverter.App
     public class TrayApplicationContext : ApplicationContext
     {
         private readonly NotifyIcon _notifyIcon;
+        private readonly Icon? _trayIcon;
         private readonly IHotkeyService _hotkeyService;
         private readonly HotkeyOrchestrator _orchestrator;
         private readonly SettingsService _settingsService;
@@ -30,14 +30,14 @@ namespace LayoutConverter.App
             ApplySettings();
 
             // Initialize NotifyIcon
+            _trayIcon = LoadTrayIcon();
             _notifyIcon = new NotifyIcon
             {
+                Icon = _trayIcon ?? SystemIcons.Application,
                 Text = "MovaCore - Layout Converter",
                 ContextMenuStrip = CreateContextMenu(),
                 Visible = true
             };
-
-            SetApplicationIcon();
 
             // Subscribe to debug notifications
             _orchestrator.ConversionCompleted += OnConversionCompleted;
@@ -52,36 +52,16 @@ namespace LayoutConverter.App
             _hotkeyService.SetTriggerKey(_currentSettings.TriggerKey);
         }
 
-        private void SetApplicationIcon()
+        private static Icon? LoadTrayIcon()
         {
             try
             {
-                string iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "mouse_icon.png");
-                if (File.Exists(iconPath))
-                {
-                    using (var bitmap = new Bitmap(iconPath))
-                    {
-                        using (var resizedIcon = new Bitmap(32, 32))
-                        {
-                            using (var g = Graphics.FromImage(resizedIcon))
-                            {
-                                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                                g.DrawImage(bitmap, 0, 0, 32, 32);
-                            }
-                            
-                            IntPtr hIcon = resizedIcon.GetHicon();
-                            _notifyIcon.Icon = Icon.FromHandle(hIcon);
-                        }
-                    }
-                }
-                else
-                {
-                    _notifyIcon.Icon = SystemIcons.Application;
-                }
+                return AppResources.LoadIcon(SystemInformation.SmallIconSize);
             }
-            catch
+            catch (Exception ex)
             {
-                _notifyIcon.Icon = SystemIcons.Application;
+                AppLog.Error("Could not load the tray icon", ex);
+                return null;
             }
         }
 
@@ -96,7 +76,7 @@ namespace LayoutConverter.App
         private ContextMenuStrip CreateContextMenu()
         {
             var menu = new ContextMenuStrip();
-            
+
             menu.Items.Add("Settings", null, (s, e) => ShowSettings());
             menu.Items.Add("-");
             menu.Items.Add("Exit", null, (s, e) => Exit());
@@ -113,12 +93,12 @@ namespace LayoutConverter.App
         {
             using (var form = new SettingsForm(_currentSettings))
             {
-                if (form.ShowDialog() == DialogResult.OK)
+                if (form.ShowDialog() == DialogResult.OK && form.UpdatedSettings is { } updatedSettings)
                 {
-                    _currentSettings = form.UpdatedSettings;
+                    _currentSettings = updatedSettings;
                     _settingsService.SaveSettings(_currentSettings);
                     ApplySettings();
-                    
+
                     if (_currentSettings.ShowNotifications)
                     {
                         _notifyIcon.ShowBalloonTip(2000, "MovaCore", "Settings saved and applied successfully!", ToolTipIcon.Info);
@@ -140,6 +120,7 @@ namespace LayoutConverter.App
             {
                 _orchestrator.ConversionCompleted -= OnConversionCompleted;
                 _notifyIcon?.Dispose();
+                _trayIcon?.Dispose();
                 _hotkeyService?.Dispose();
             }
             base.Dispose(disposing);

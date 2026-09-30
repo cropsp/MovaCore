@@ -52,6 +52,7 @@ namespace LayoutConverter.App.Services
 
                 if (!await _clipboardService.TrySetTextAsync(converted))
                 {
+                    AppLog.Error("Could not put the converted text on the clipboard");
                     ConversionCompleted?.Invoke(this, "Could not put the converted text on the clipboard. Please try again.");
                     return;
                 }
@@ -61,7 +62,8 @@ namespace LayoutConverter.App.Services
             }
             catch (Exception ex)
             {
-                // Keep errors for troubleshooting
+                // Never log the text itself: it is the user's clipboard content
+                AppLog.Error("Conversion failed", ex);
                 ConversionCompleted?.Invoke(this, $"System Error: {ex.Message}");
             }
             finally

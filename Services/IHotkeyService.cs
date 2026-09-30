@@ -1,7 +1,7 @@
 using System;
 using System.Threading;
 using SharpHook;
-using SharpHook.Native;
+using SharpHook.Data;
 
 namespace LayoutConverter.App.Services
 {
@@ -10,7 +10,7 @@ namespace LayoutConverter.App.Services
         void Start();
         void Stop();
         void SetTriggerKey(KeyCode key);
-        event EventHandler HotkeyTriggered;
+        event EventHandler? HotkeyTriggered;
         void SimulateCopy();
         void SimulatePaste();
     }
@@ -19,10 +19,10 @@ namespace LayoutConverter.App.Services
     {
         private readonly IGlobalHook _hook;
         private readonly EventSimulator _simulator;
-        private bool _isTriggerKeyDown = false; 
+        private bool _isTriggerKeyDown = false;
         private KeyCode _triggerKey = KeyCode.VcF10; // Default
 
-        public event EventHandler HotkeyTriggered;
+        public event EventHandler? HotkeyTriggered;
 
         public HotkeyService()
         {
@@ -40,7 +40,11 @@ namespace LayoutConverter.App.Services
 
         public void Start()
         {
-            System.Threading.Tasks.Task.Run(() => _hook.Run());
+            // Run() blocks until the hook is disposed; if it cannot start (e.g. uiohook.dll is missing), log why
+            System.Threading.Tasks.Task.Run(() => _hook.Run())
+                .ContinueWith(
+                    t => AppLog.Error("Keyboard hook failed", t.Exception?.GetBaseException()),
+                    System.Threading.Tasks.TaskContinuationOptions.OnlyOnFaulted);
         }
 
         public void Stop()
@@ -48,7 +52,7 @@ namespace LayoutConverter.App.Services
             _hook.Dispose();
         }
 
-        private void OnKeyPressed(object sender, KeyboardHookEventArgs e)
+        private void OnKeyPressed(object? sender, KeyboardHookEventArgs e)
         {
             if (e.Data.KeyCode == _triggerKey)
             {
@@ -57,7 +61,7 @@ namespace LayoutConverter.App.Services
             }
         }
 
-        private void OnKeyReleased(object sender, KeyboardHookEventArgs e)
+        private void OnKeyReleased(object? sender, KeyboardHookEventArgs e)
         {
             if (e.Data.KeyCode == _triggerKey)
             {
@@ -79,7 +83,7 @@ namespace LayoutConverter.App.Services
             _simulator.SimulateKeyRelease(KeyCode.VcRightShift);
             _simulator.SimulateKeyRelease(KeyCode.VcLeftMeta);
             _simulator.SimulateKeyRelease(KeyCode.VcRightMeta);
-            
+
             Thread.Sleep(20);
         }
 

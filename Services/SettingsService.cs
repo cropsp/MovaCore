@@ -2,8 +2,8 @@ using System;
 using System.IO;
 using System.Text.Json;
 using System.Windows.Forms;
-using Microsoft.Win32;
 using LayoutConverter.App.Models;
+using Microsoft.Win32;
 
 namespace LayoutConverter.App.Services
 {
@@ -30,7 +30,10 @@ namespace LayoutConverter.App.Services
                     return JsonSerializer.Deserialize(json, SettingsJsonContext.Default.AppSettings) ?? new AppSettings();
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLog.Error("Could not load settings, using defaults", ex);
+            }
             return new AppSettings();
         }
 
@@ -40,11 +43,12 @@ namespace LayoutConverter.App.Services
             {
                 string json = JsonSerializer.Serialize(settings, SettingsJsonContext.Default.AppSettings);
                 File.WriteAllText(_settingsFilePath, json);
-                
+
                 UpdateStartupRegistration(settings.LaunchAtStartup);
             }
             catch (Exception ex)
             {
+                AppLog.Error("Could not save settings", ex);
                 MessageBox.Show($"Error saving settings: {ex.Message}", "MovaCore Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -53,7 +57,7 @@ namespace LayoutConverter.App.Services
         {
             try
             {
-                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true))
+                using (RegistryKey? key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true))
                 {
                     if (key != null)
                     {
@@ -68,7 +72,10 @@ namespace LayoutConverter.App.Services
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLog.Error("Could not update the autostart registry entry", ex);
+            }
         }
     }
 

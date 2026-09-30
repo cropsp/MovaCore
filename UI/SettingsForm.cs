@@ -1,8 +1,10 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.Windows.Forms;
-using SharpHook.Native;
 using LayoutConverter.App.Models;
+using LayoutConverter.App.Services;
+using SharpHook.Data;
 
 namespace LayoutConverter.App.UI
 {
@@ -19,7 +21,7 @@ namespace LayoutConverter.App.UI
         private Button _saveButton;
         private Button _cancelButton;
 
-        public AppSettings UpdatedSettings { get; private set; }
+        public AppSettings? UpdatedSettings { get; private set; }
 
         public SettingsForm(AppSettings currentSettings)
         {
@@ -28,8 +30,14 @@ namespace LayoutConverter.App.UI
             InitializeComponent();
         }
 
+        [MemberNotNull(nameof(_hotkeyLabel), nameof(_recordButton), nameof(_startupCheckBox), nameof(_notifyCheckBox), nameof(_saveButton), nameof(_cancelButton))]
         private void InitializeComponent()
         {
+            // The layout below is in pixels at 96 DPI; AutoScaleMode.Dpi scales it to the monitor's DPI
+            this.SuspendLayout();
+            this.AutoScaleDimensions = new SizeF(96F, 96F);
+            this.AutoScaleMode = AutoScaleMode.Dpi;
+
             this.Text = "MovaCore Settings";
             this.Size = new Size(350, 400);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -47,10 +55,14 @@ namespace LayoutConverter.App.UI
             };
             try
             {
-                string iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "mouse_icon.png");
-                if (System.IO.File.Exists(iconPath)) logoBox.Image = Image.FromFile(iconPath);
+                logoBox.Image = AppResources.LoadLogo();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                AppLog.Error("Could not load the settings logo", ex);
+            }
+            // PictureBox does not dispose its image
+            this.Disposed += (s, e) => logoBox.Image?.Dispose();
             this.Controls.Add(logoBox);
 
             var titleLabel = new Label
@@ -132,6 +144,8 @@ namespace LayoutConverter.App.UI
 
             this.KeyPreview = true;
             this.KeyDown += OnFormKeyDown;
+
+            this.ResumeLayout(false);
         }
 
         private void StartRecording()
@@ -142,7 +156,7 @@ namespace LayoutConverter.App.UI
             _hotkeyLabel.Text = "Press any key...";
         }
 
-        private void OnFormKeyDown(object sender, KeyEventArgs e)
+        private void OnFormKeyDown(object? sender, KeyEventArgs e)
         {
             if (_isRecording)
             {
@@ -150,7 +164,7 @@ namespace LayoutConverter.App.UI
                 // but for single keys we can try direct mapping or just use SharpHook in background.
                 // For simplicity, let's use a basic mapping or ask user to use common keys.
                 // We'll use the raw ScanCode or Mapping for common keys.
-                
+
                 // For now, let's map F1-F12 and common keys
                 KeyCode? detected = MapWinFormsKeyToSharpHook(e.KeyCode);
                 if (detected.HasValue)

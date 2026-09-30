@@ -1,7 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using LayoutConverter.App.Services;
-using SharpHook.Native;
+using SharpHook.Data;
 
 namespace MovaCore.Tests
 {
@@ -48,7 +48,7 @@ namespace MovaCore.Tests
         public int PasteCalls { get; set; }
 
         // Never raised by the fake, so the accessors are intentionally empty.
-        public event EventHandler HotkeyTriggered
+        public event EventHandler? HotkeyTriggered
         {
             add { }
             remove { }
