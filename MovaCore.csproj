@@ -31,10 +31,12 @@
     <RepositoryUrl>https://github.com/cropsp/MovaCore</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     
-    <!-- WinForms is not trim-annotated: its own trim warnings would drown ours, so they are audited in CI instead.
-         _SuppressWinFormsTrimError bypasses NETSDK1175, which otherwise refuses to trim/AOT-publish WinForms. -->
-    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
+    <!-- _SuppressWinFormsTrimError bypasses NETSDK1175, which otherwise refuses to trim/AOT-publish WinForms.
+         WinForms itself then produces AOT/trim/single-file warnings at publish (IL3053, IL2104, IL3000) that this
+         project cannot fix, so they stay visible but do not fail the build (CI lists them in the job summary).
+         Our own code is still covered: the Roslyn AOT/trim analyzers run at compile time, where warnings are errors. -->
     <_SuppressWinFormsTrimError>true</_SuppressWinFormsTrimError>
+    <IlcTreatWarningsAsErrors>false</IlcTreatWarningsAsErrors>
   </PropertyGroup>
 
   <ItemGroup>

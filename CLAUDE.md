@@ -37,7 +37,7 @@ the shim in `eng/LinuxCompileCheck.targets` (command in the file; for `dotnet fo
 as environment variables). Either way the output is not runnable.
 
 CI (`.github/workflows/ci.yml`, Windows runners) is the only place the real app is built, AOT-published (x64 and
-arm64) and smoke-tested; its job summary lists the publish output sizes and the AOT warning audit. Pushing a `v*` tag
+arm64) and smoke-tested; its job summary lists the publish output sizes and the AOT/trim warnings (all currently from WinForms itself). Pushing a `v*` tag
 creates a draft release with zip archives and SHA256 sums.
 
 ## Architecture
@@ -92,8 +92,9 @@ default globs because the app project sits at the repository root.
 - Anything serialized with `System.Text.Json` must go through the source-generated `SettingsJsonContext`
   (`Models/AppSettings.cs`); add new types to its `[JsonSerializable]` list. Reflection-based serialization breaks
   under AOT.
-- Trim/AOT warnings are suppressed in the csproj (`SuppressTrimAnalysisWarnings`, `_SuppressWinFormsTrimError`),
-  and WinForms is not officially AOT-supported. A clean `dotnet build` proves nothing about the published exe;
+- WinForms is not officially AOT-supported: `_SuppressWinFormsTrimError` forces the publish, and ILC warnings (all
+  from WinForms today) are kept non-fatal with `IlcTreatWarningsAsErrors=false`. A new IL warning naming MovaCore or
+  SharpHook in the CI summary is a real problem. A clean `dotnet build` proves nothing about the published exe;
   verify UI paths against the AOT-published binary.
 - WinForms and Native AOT are verified only by running the published exe (`--smoke-test`, run by CI). When you touch
   UI, resources, P/Invoke or DI registration, extend `SmokeTest.cs` if the new path is not exercised.
