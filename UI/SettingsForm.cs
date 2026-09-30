@@ -160,7 +160,7 @@ namespace LayoutConverter.App.UI
         {
             if (_isRecording)
             {
-                // Mapping WinForms Keys to SharpHook KeyCode is complex, 
+                // Mapping WinForms Keys to SharpHook KeyCode is complex,
                 // but for single keys we can try direct mapping or just use SharpHook in background.
                 // For simplicity, let's use a basic mapping or ask user to use common keys.
                 // We'll use the raw ScanCode or Mapping for common keys.
