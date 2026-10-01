@@ -31,7 +31,7 @@ All notable changes to MovaCore are documented here. The format follows
   `%LOCALAPPDATA%\MovaCore\logs`, ARM64 builds.
 
 ### Changed
-- .NET 10 (LTS) instead of .NET 8, SharpHook 7.1; the executable is 17.5 MB instead of 54 MB.
+- .NET 10 (LTS) instead of .NET 8, SharpHook 7.1; the executable is 18.4 MB instead of 54 MB.
 - The tray icon has a transparent background and is embedded in the executable.
 - Settings store the hotkey by name; files written by v1.0.0 still load.
 - "Launch at Windows startup" reflects the actual autostart entry and follows the executable if it is moved.
