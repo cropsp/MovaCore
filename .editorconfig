@@ -1,0 +1,29 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{csproj,props,targets,xml,json,yml,yaml}]
+indent_size = 2
+
+# Visual Studio writes .sln files with tabs
+[*.sln]
+indent_style = tab
+
+# Two trailing spaces are a line break in Markdown
+[*.md]
+trim_trailing_whitespace = false
+
+[*.cs]
+# Preferences below match the existing code. They are suggestions only,
+# so `dotnet format --verify-no-changes` does not start rewriting code.
+csharp_new_line_before_open_brace = all
+dotnet_sort_system_directives_first = true
+csharp_style_namespace_declarations = block_scoped:suggestion
+csharp_prefer_braces = when_multiline:suggestion
+dotnet_style_qualification_for_field = false:suggestion

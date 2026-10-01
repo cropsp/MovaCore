@@ -1,107 +1,170 @@
 using System;
+using System.Diagnostics;
 using System.Drawing;
-using System.IO;
-using System.Windows.Forms;
+using System.Threading;
 using System.Threading.Tasks;
-using LayoutConverter.App.Services;
-using LayoutConverter.App.Models;
-using LayoutConverter.App.UI;
+using System.Windows.Forms;
+using MovaCore.Models;
+using MovaCore.Services;
+using MovaCore.UI;
 
-namespace LayoutConverter.App
+namespace MovaCore
 {
     public class TrayApplicationContext : ApplicationContext
     {
+        private const string AppName = "MovaCore";
+        private const string ReleasesUrl = "https://github.com/cropsp/MovaCore/releases";
+
         private readonly NotifyIcon _notifyIcon;
+        private readonly Icon? _trayIcon;
         private readonly IHotkeyService _hotkeyService;
         private readonly HotkeyOrchestrator _orchestrator;
         private readonly SettingsService _settingsService;
+        private readonly SynchronizationContext _uiContext;
         private AppSettings _currentSettings;
+
+        // Created together with the tray menu, after the language is known (see ApplyLanguage)
+        private ToolStripMenuItem? _settingsItem;
+        private ToolStripMenuItem? _pauseItem;
+        private ToolStripMenuItem? _aboutItem;
+        private ToolStripMenuItem? _exitItem;
+
+        private SettingsForm? _settingsForm; // the open settings window, if any
+        private bool _paused; // not persisted: MovaCore always starts active
 
         public TrayApplicationContext(
             IHotkeyService hotkeyService,
-            HotkeyOrchestrator orchestrator)
+            HotkeyOrchestrator orchestrator,
+            SettingsService settingsService)
         {
             _hotkeyService = hotkeyService;
             _orchestrator = orchestrator;
-            _settingsService = new SettingsService();
+            _settingsService = settingsService;
 
             // Load and apply settings
-            _currentSettings = _settingsService.LoadSettings();
+            _currentSettings = _settingsService.Load();
             ApplySettings();
+            ApplyLanguage(); // before the tray icon and its menu are created, so they start in the right language
 
             // Initialize NotifyIcon
+            _trayIcon = LoadTrayIcon();
             _notifyIcon = new NotifyIcon
             {
-                Text = "MovaCore - Layout Converter",
+                Icon = _trayIcon ?? SystemIcons.Application,
+                Text = Strings.TrayTooltip,
                 ContextMenuStrip = CreateContextMenu(),
                 Visible = true
             };
+            _notifyIcon.MouseDoubleClick += OnTrayDoubleClick;
 
-            SetApplicationIcon();
-
-            // Subscribe to debug notifications
-            _orchestrator.ConversionCompleted += OnConversionCompleted;
+            // The events below arrive on worker threads, but NotifyIcon may only be used on this (UI) thread
+            _uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+            _orchestrator.ConversionFailed += OnConversionFailed;
+            _hotkeyService.HookFailed += OnHookFailed;
 
             // Start Hotkey Service
-            _hotkeyService.Start();
             _hotkeyService.HotkeyTriggered += OnHotkeyTriggered;
+            _hotkeyService.Start();
         }
 
         private void ApplySettings()
         {
-            _hotkeyService.SetTriggerKey(_currentSettings.TriggerKey);
+            _hotkeyService.SetTrigger(_currentSettings.Trigger);
+            _hotkeyService.SetExcludedProcesses(_currentSettings.ExcludedProcesses);
+            _hotkeyService.CopyPasteKeys = _currentSettings.CopyPasteKeys;
+            _orchestrator.RestoreClipboard = _currentSettings.RestoreClipboard;
+            _orchestrator.SwitchLayout = _currentSettings.SwitchLayout;
+            _orchestrator.SelectConvertedText = _currentSettings.SelectConvertedText;
+            _orchestrator.ConvertLastWord = _currentSettings.ConvertLastWord;
         }
 
-        private void SetApplicationIcon()
+        private void ApplyLanguage()
+        {
+            Strings.Language = WindowsLanguage.Resolve(_currentSettings.Language);
+            UpdateTrayTexts();
+        }
+
+        // Does nothing while the tray icon does not exist yet: the constructor applies the language first
+        private void UpdateTrayTexts()
+        {
+            if (_settingsItem == null || _pauseItem == null || _aboutItem == null || _exitItem == null) return;
+
+            _settingsItem.Text = Strings.MenuSettings;
+            _pauseItem.Text = Strings.MenuPause;
+            _pauseItem.Checked = _paused;
+            _aboutItem.Text = Strings.MenuAbout;
+            _exitItem.Text = Strings.MenuExit;
+            _notifyIcon.Text = _paused ? Strings.TrayTooltipPaused : Strings.TrayTooltip;
+        }
+
+        private static Icon? LoadTrayIcon()
         {
             try
             {
-                string iconPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "mouse_icon.png");
-                if (File.Exists(iconPath))
-                {
-                    using (var bitmap = new Bitmap(iconPath))
-                    {
-                        using (var resizedIcon = new Bitmap(32, 32))
-                        {
-                            using (var g = Graphics.FromImage(resizedIcon))
-                            {
-                                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                                g.DrawImage(bitmap, 0, 0, 32, 32);
-                            }
-                            
-                            IntPtr hIcon = resizedIcon.GetHicon();
-                            _notifyIcon.Icon = Icon.FromHandle(hIcon);
-                        }
-                    }
-                }
-                else
-                {
-                    _notifyIcon.Icon = SystemIcons.Application;
-                }
+                return AppResources.LoadIcon(SystemInformation.SmallIconSize);
             }
-            catch
+            catch (Exception ex)
             {
-                _notifyIcon.Icon = SystemIcons.Application;
+                AppLog.Error("Could not load the tray icon", ex);
+                return null;
             }
         }
 
-        private void OnConversionCompleted(object? sender, string message)
+        private void OnConversionFailed(object? sender, string message)
         {
-            if (_currentSettings.ShowNotifications && !string.IsNullOrEmpty(message))
+            _uiContext.Post(_ =>
             {
-                _notifyIcon.ShowBalloonTip(3000, "MovaCore", message, ToolTipIcon.Info);
-            }
+                if (_currentSettings.ShowNotifications && !string.IsNullOrEmpty(message))
+                {
+                    _notifyIcon.ShowBalloonTip(3000, AppName, message, ToolTipIcon.Info);
+                }
+            }, null);
+        }
+
+        private void OnHookFailed(object? sender, Exception error)
+        {
+            // Shown even with notifications off: without the hook the hotkey silently does nothing
+            _uiContext.Post(_ => _notifyIcon.ShowBalloonTip(
+                5000,
+                AppName,
+                Strings.BalloonHookFailed(error.Message),
+                ToolTipIcon.Error), null);
         }
 
         private ContextMenuStrip CreateContextMenu()
         {
             var menu = new ContextMenuStrip();
-            
-            menu.Items.Add("Settings", null, (s, e) => ShowSettings());
-            menu.Items.Add("-");
-            menu.Items.Add("Exit", null, (s, e) => Exit());
+
+            _settingsItem = new ToolStripMenuItem(Strings.MenuSettings, null, (s, e) => ShowSettings());
+            _pauseItem = new ToolStripMenuItem(Strings.MenuPause, null, (s, e) => TogglePause());
+            _aboutItem = new ToolStripMenuItem(Strings.MenuAbout, null, (s, e) => ShowAbout());
+            _exitItem = new ToolStripMenuItem(Strings.MenuExit, null, (s, e) => Exit());
+
+            menu.Items.Add(_settingsItem);
+            menu.Items.Add(_pauseItem);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(_aboutItem);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(_exitItem);
 
             return menu;
+        }
+
+        private void OnTrayDoubleClick(object? sender, MouseEventArgs e)
+        {
+            // NotifyIcon reports a double click of the right button too
+            if (e.Button == MouseButtons.Left) ShowSettings();
+        }
+
+        private void TogglePause()
+        {
+            _paused = !_paused;
+            if (_paused)
+                _hotkeyService.Stop();
+            else
+                _hotkeyService.Start();
+
+            UpdateTrayTexts();
         }
 
         private void OnHotkeyTriggered(object? sender, EventArgs e)
@@ -111,19 +174,76 @@ namespace LayoutConverter.App
 
         private void ShowSettings()
         {
-            using (var form = new SettingsForm(_currentSettings))
+            // A modal dialog does not block the tray icon, so the menu can ask for the window again
+            if (_settingsForm != null)
             {
-                if (form.ShowDialog() == DialogResult.OK)
+                _settingsForm.Activate();
+                return;
+            }
+
+            using (var form = new SettingsForm(_currentSettings, ct => _hotkeyService.CaptureHotkeyAsync(ct)))
+            {
+                _settingsForm = form;
+                // Pausing or resuming while a hotkey is being recorded would leave the hook in the wrong state
+                _pauseItem?.Enabled = false;
+
+                DialogResult result;
+                try
                 {
-                    _currentSettings = form.UpdatedSettings;
-                    _settingsService.SaveSettings(_currentSettings);
+                    result = form.ShowDialog();
+                }
+                finally
+                {
+                    _settingsForm = null;
+                    _pauseItem?.Enabled = true;
+                }
+
+                if (result == DialogResult.OK && form.UpdatedSettings is { } updatedSettings)
+                {
+                    _currentSettings = updatedSettings;
                     ApplySettings();
-                    
+                    ApplyLanguage();
+
+                    try
+                    {
+                        _settingsService.Save(_currentSettings);
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLog.Error("Could not save settings", ex);
+                        MessageBox.Show(
+                            Strings.SettingsNotSaved(ex.Message),
+                            AppName,
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Error);
+                        return;
+                    }
+
                     if (_currentSettings.ShowNotifications)
                     {
-                        _notifyIcon.ShowBalloonTip(2000, "MovaCore", "Settings saved and applied successfully!", ToolTipIcon.Info);
+                        _notifyIcon.ShowBalloonTip(2000, AppName, Strings.BalloonSettingsSaved, ToolTipIcon.Info);
                     }
                 }
+            }
+        }
+
+        private void ShowAbout()
+        {
+            string version = Strings.FormatVersion(typeof(TrayApplicationContext).Assembly.GetName().Version);
+            DialogResult answer = MessageBox.Show(
+                Strings.AboutText(version) + "\n\n" + Strings.AboutOpenReleasesPrompt,
+                AppName,
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Information);
+            if (answer != DialogResult.Yes) return;
+
+            try
+            {
+                Process.Start(new ProcessStartInfo(ReleasesUrl) { UseShellExecute = true })?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                AppLog.Error("Could not open the releases page", ex);
             }
         }
 
@@ -138,8 +258,10 @@ namespace LayoutConverter.App
         {
             if (disposing)
             {
-                _orchestrator.ConversionCompleted -= OnConversionCompleted;
+                _orchestrator.ConversionFailed -= OnConversionFailed;
+                _hotkeyService.HookFailed -= OnHookFailed;
                 _notifyIcon?.Dispose();
+                _trayIcon?.Dispose();
                 _hotkeyService?.Dispose();
             }
             base.Dispose(disposing);

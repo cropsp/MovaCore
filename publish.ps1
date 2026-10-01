@@ -26,8 +26,9 @@ if (-not (Get-Command "dotnet" -ErrorAction SilentlyContinue)) {
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "Native AOT Build completed successfully!"
-    Write-Host "Output location: bin\$configuration\net8.0-windows10.0.17763.0\$runtime\publish\"
-    Write-Host "Your single executable MovaCore.exe is ready."
+    Write-Host "Output location: bin\$configuration\net10.0-windows\$runtime\publish\"
+    Write-Host "Ship MovaCore.exe together with uiohook.dll: Native AOT cannot embed the native hook library."
 } else {
     Write-Host "Build failed. Please check the logs above."
+    exit 1
 }

@@ -1,80 +1,188 @@
 using System;
 using System.Diagnostics;
+using System.Globalization;
+using System.Threading;
 using System.Threading.Tasks;
-using LayoutConverter.App.Services;
 
-namespace LayoutConverter.App.Services
+namespace MovaCore.Services
 {
     public class HotkeyOrchestrator
     {
+        // Longer text is not re-selected: one Shift+Left per character would take noticeable time
+        private const int MaxReselectLength = 300;
+
         private readonly IHotkeyService _hotkeyService;
         private readonly ILayoutConverterService _converterService;
         private readonly IClipboardService _clipboardService;
-        
-        private bool _isProcessing = false;
+        private readonly IKeyboardLayoutSwitcher _layoutSwitcher;
 
-        public event EventHandler<string> ConversionCompleted;
+        // 0 = idle, 1 = busy. Interlocked because every hotkey press starts on its own thread-pool thread.
+        private int _isProcessing;
+        private volatile bool _restoreClipboard = true;
+        private volatile bool _switchLayout = true;
+        private volatile bool _selectConvertedText = true;
+        private volatile bool _convertLastWord;
+
+        public event EventHandler<string>? ConversionFailed;
+
+        /// <summary>Put the user's previous clipboard content back after converting (a user setting).</summary>
+        public bool RestoreClipboard
+        {
+            get => _restoreClipboard;
+            set => _restoreClipboard = value;
+        }
+
+        /// <summary>Switch the target window to the layout of the converted text (a user setting).</summary>
+        public bool SwitchLayout
+        {
+            get => _switchLayout;
+            set => _switchLayout = value;
+        }
+
+        /// <summary>Select the pasted text again, so a second press converts it back (a user setting).</summary>
+        public bool SelectConvertedText
+        {
+            get => _selectConvertedText;
+            set => _selectConvertedText = value;
+        }
+
+        /// <summary>With nothing selected, convert the word before the caret (a user setting, off by default).</summary>
+        public bool ConvertLastWord
+        {
+            get => _convertLastWord;
+            set => _convertLastWord = value;
+        }
+
+        /// <summary>How long to wait for the foreground app to put the selection on the clipboard.</summary>
+        internal TimeSpan CopyTimeout { get; init; } = TimeSpan.FromSeconds(1);
+
+        /// <summary>How long to wait for the foreground app to read the converted text after Ctrl+V.</summary>
+        internal TimeSpan PasteTimeout { get; init; } = TimeSpan.FromSeconds(2);
+
+        /// <summary>Pause after the paste is read, for apps that read the clipboard twice or insert slowly.</summary>
+        internal TimeSpan RestoreDelay { get; init; } = TimeSpan.FromMilliseconds(250);
 
         public HotkeyOrchestrator(
             IHotkeyService hotkeyService,
             ILayoutConverterService converterService,
-            IClipboardService clipboardService)
+            IClipboardService clipboardService,
+            IKeyboardLayoutSwitcher layoutSwitcher)
         {
             _hotkeyService = hotkeyService;
             _converterService = converterService;
             _clipboardService = clipboardService;
+            _layoutSwitcher = layoutSwitcher;
         }
 
         public async Task ExecuteConversionAsync()
         {
-            if (_isProcessing) return;
-            _isProcessing = true;
+            if (Interlocked.CompareExchange(ref _isProcessing, 1, 0) != 0) return;
 
             try
             {
-                // 1. Clear
-                await _clipboardService.SetTextAsync("");
-                await Task.Delay(50); 
+                // 0. Our Ctrl+C is about to replace whatever the user has on the clipboard, so keep a copy
+                ClipboardSnapshot? snapshot = RestoreClipboard ? await _clipboardService.TryCaptureAsync() : null;
 
-                // 2. Simulate Copy
-                _hotkeyService.SimulateCopy();
-
-                // 3. Polling
-                string capturedText = "";
-                Stopwatch sw = Stopwatch.StartNew();
-                
-                while (sw.ElapsedMilliseconds < 1000) 
+                // 1. Copy the selection. Instead of clearing the clipboard first, watch its sequence number:
+                //    if it does not change, nothing was selected, and stale clipboard content is never pasted.
+                if (!await CopyAsync())
                 {
-                    await Task.Delay(50); 
-                    capturedText = await _clipboardService.GetTextAsync();
-                    
-                    if (!string.IsNullOrWhiteSpace(capturedText))
-                    {
-                        break;
-                    }
+                    // Off by default: if the first copy was merely slow, this would extend the user's selection
+                    if (!ConvertLastWord) return;
+
+                    _hotkeyService.SimulateSelectWordLeft();
+                    if (!await CopyAsync()) return;
+                }
+                uint sequenceAfterCopy = _clipboardService.GetSequenceNumber();
+
+                // 2. Read (null: the copied content is not text, e.g. an image or files) and convert
+                string? capturedText = await _clipboardService.TryGetTextAsync();
+                string? converted = string.IsNullOrWhiteSpace(capturedText) ? null : _converterService.Convert(capturedText);
+                if (capturedText == null || converted == null || converted == capturedText)
+                {
+                    await RestoreAsync(snapshot, sequenceAfterCopy);
+                    return;
                 }
 
-                if (!string.IsNullOrWhiteSpace(capturedText))
+                // 3. Paste the converted text over the selection
+                if (!await _clipboardService.TrySetTextAsync(converted))
                 {
-                    string converted = await _converterService.ConvertAsync(capturedText);
-                    
-                    if (converted != capturedText)
-                    {
-                        await _clipboardService.SetTextAsync(converted);
-                        await Task.Delay(50); 
-                        _hotkeyService.SimulatePaste();
-                    }
+                    AppLog.Error("Could not put the converted text on the clipboard");
+                    ConversionFailed?.Invoke(this, Strings.BalloonClipboardWriteFailed);
+                    await RestoreAsync(snapshot, sequenceAfterCopy);
+                    return;
                 }
+
+                await Task.Delay(50);
+                long pasteStarted = Stopwatch.GetTimestamp();
+                _hotkeyService.SimulatePaste();
+
+                if (snapshot == null && !SelectConvertedText && !SwitchLayout) return;
+
+                // 4. Everything else waits until the app has actually read the converted text. Restoring earlier would
+                //    make it paste the old clipboard content instead; if it never reads it, the converted text stays.
+                if (!await _clipboardService.WaitForTextReadAsync(pasteStarted, PasteTimeout))
+                {
+                    AppLog.Info("The converted text was not pasted in time; the clipboard keeps it");
+                    return;
+                }
+                await Task.Delay(RestoreDelay);
+
+                if (SelectConvertedText && TryCountCaretSteps(converted, out int steps))
+                    _hotkeyService.SimulateSelectLeft(steps);
+
+                if (SwitchLayout)
+                    _layoutSwitcher.SwitchForegroundWindowTo(_converterService.TargetOf(capturedText));
+
+                await RestoreAsync(snapshot, sequenceAfterCopy);
             }
             catch (Exception ex)
             {
-                // Keep errors for troubleshooting
-                ConversionCompleted?.Invoke(this, $"System Error: {ex.Message}");
+                // Never log the text itself: it is the user's clipboard content
+                AppLog.Error("Conversion failed", ex);
+                ConversionFailed?.Invoke(this, Strings.BalloonUnexpectedError(ex.Message));
             }
             finally
             {
-                _isProcessing = false;
+                Volatile.Write(ref _isProcessing, 0);
             }
+        }
+
+        /// <summary>
+        /// How many Shift+Left presses select <paramref name="text"/> right after pasting it. Only for single-line text
+        /// of reasonable length: editors count line breaks differently, and a caret step is a text element (an emoji is
+        /// one step but two UTF-16 units).
+        /// </summary>
+        internal static bool TryCountCaretSteps(string text, out int steps)
+        {
+            steps = 0;
+            if (text.Contains('\n') || text.Contains('\r')) return false;
+
+            steps = new StringInfo(text).LengthInTextElements;
+            return steps > 0 && steps <= MaxReselectLength;
+        }
+
+        private async Task<bool> CopyAsync()
+        {
+            uint sequenceBefore = _clipboardService.GetSequenceNumber();
+            _hotkeyService.SimulateCopy();
+            return await WaitForClipboardChangeAsync(sequenceBefore);
+        }
+
+        private async Task RestoreAsync(ClipboardSnapshot? snapshot, uint sequenceAfterCopy)
+        {
+            if (snapshot != null) await _clipboardService.TryRestoreAsync(snapshot, sequenceAfterCopy);
+        }
+
+        private async Task<bool> WaitForClipboardChangeAsync(uint sequenceBefore)
+        {
+            var sw = Stopwatch.StartNew();
+            while (sw.Elapsed < CopyTimeout)
+            {
+                await Task.Delay(20);
+                if (_clipboardService.GetSequenceNumber() != sequenceBefore) return true;
+            }
+            return false;
         }
     }
 }

@@ -4,6 +4,10 @@ VisualStudioVersion = 17.5.2.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MovaCore", "MovaCore.csproj", "{8125F343-6D3D-DCBE-5240-FDCBFE7160B2}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{6AB920BF-CEC3-4067-BDE4-56405FF6B302}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MovaCore.Tests", "tests\MovaCore.Tests\MovaCore.Tests.csproj", "{B242C0BA-2A79-46A9-810C-DA151F0958FB}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -14,11 +18,18 @@ Global
 		{8125F343-6D3D-DCBE-5240-FDCBFE7160B2}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8125F343-6D3D-DCBE-5240-FDCBFE7160B2}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{8125F343-6D3D-DCBE-5240-FDCBFE7160B2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B242C0BA-2A79-46A9-810C-DA151F0958FB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B242C0BA-2A79-46A9-810C-DA151F0958FB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B242C0BA-2A79-46A9-810C-DA151F0958FB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B242C0BA-2A79-46A9-810C-DA151F0958FB}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {40849D2F-627B-4823-9FC5-C111710EEC73}
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{B242C0BA-2A79-46A9-810C-DA151F0958FB} = {6AB920BF-CEC3-4067-BDE4-56405FF6B302}
 	EndGlobalSection
 EndGlobal

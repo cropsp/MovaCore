@@ -1,117 +1,45 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
-using SharpHook;
-using SharpHook.Native;
+using System.Threading.Tasks;
+using MovaCore.Models;
 
-namespace LayoutConverter.App.Services
+namespace MovaCore.Services
 {
     public interface IHotkeyService : IDisposable
     {
+        /// <summary>Starts the global keyboard hook. Can be called again after <see cref="Stop"/>.</summary>
         void Start();
+
+        /// <summary>Stops the hook without disposing it.</summary>
         void Stop();
-        void SetTriggerKey(KeyCode key);
-        event EventHandler HotkeyTriggered;
+
+        void SetTrigger(Hotkey trigger);
+
+        /// <summary>Applications (process names) in which the trigger is left alone.</summary>
+        void SetExcludedProcesses(IEnumerable<string> processNames);
+
+        CopyPasteKeys CopyPasteKeys { get; set; }
+
+        /// <summary>Raised on the hook thread when the trigger key is released.</summary>
+        event EventHandler? HotkeyTriggered;
+
+        /// <summary>Raised on a worker thread when the hook cannot start or stops with an error.</summary>
+        event EventHandler<Exception>? HookFailed;
+
+        /// <summary>
+        /// Captures the next key the user presses together with the held modifiers, without passing it to any
+        /// application and without triggering a conversion. Esc or cancellation returns null.
+        /// </summary>
+        Task<Hotkey?> CaptureHotkeyAsync(CancellationToken cancellationToken);
+
         void SimulateCopy();
         void SimulatePaste();
-    }
 
-    public class HotkeyService : IHotkeyService
-    {
-        private readonly IGlobalHook _hook;
-        private readonly EventSimulator _simulator;
-        private bool _isTriggerKeyDown = false; 
-        private KeyCode _triggerKey = KeyCode.VcF10; // Default
+        /// <summary>Shift+Left the given number of times: selects text just pasted before the caret.</summary>
+        void SimulateSelectLeft(int caretSteps);
 
-        public event EventHandler HotkeyTriggered;
-
-        public HotkeyService()
-        {
-            _hook = new SimpleGlobalHook();
-            _simulator = new EventSimulator();
-
-            _hook.KeyPressed += OnKeyPressed;
-            _hook.KeyReleased += OnKeyReleased;
-        }
-
-        public void SetTriggerKey(KeyCode key)
-        {
-            _triggerKey = key;
-        }
-
-        public void Start()
-        {
-            System.Threading.Tasks.Task.Run(() => _hook.Run());
-        }
-
-        public void Stop()
-        {
-            _hook.Dispose();
-        }
-
-        private void OnKeyPressed(object sender, KeyboardHookEventArgs e)
-        {
-            if (e.Data.KeyCode == _triggerKey)
-            {
-                e.SuppressEvent = true;
-                _isTriggerKeyDown = true;
-            }
-        }
-
-        private void OnKeyReleased(object sender, KeyboardHookEventArgs e)
-        {
-            if (e.Data.KeyCode == _triggerKey)
-            {
-                e.SuppressEvent = true;
-
-                if (_isTriggerKeyDown)
-                {
-                    _isTriggerKeyDown = false;
-                    HotkeyTriggered?.Invoke(this, EventArgs.Empty);
-                }
-            }
-        }
-
-        private void ReleaseModifiers()
-        {
-            _simulator.SimulateKeyRelease(KeyCode.VcLeftAlt);
-            _simulator.SimulateKeyRelease(KeyCode.VcRightAlt);
-            _simulator.SimulateKeyRelease(KeyCode.VcLeftShift);
-            _simulator.SimulateKeyRelease(KeyCode.VcRightShift);
-            _simulator.SimulateKeyRelease(KeyCode.VcLeftMeta);
-            _simulator.SimulateKeyRelease(KeyCode.VcRightMeta);
-            
-            Thread.Sleep(20);
-        }
-
-        public void SimulateCopy()
-        {
-            ReleaseModifiers();
-
-            _simulator.SimulateKeyPress(KeyCode.VcLeftControl);
-            Thread.Sleep(25);
-            _simulator.SimulateKeyPress(KeyCode.VcC);
-            Thread.Sleep(25);
-            _simulator.SimulateKeyRelease(KeyCode.VcC);
-            Thread.Sleep(25);
-            _simulator.SimulateKeyRelease(KeyCode.VcLeftControl);
-        }
-
-        public void SimulatePaste()
-        {
-            ReleaseModifiers();
-
-            _simulator.SimulateKeyPress(KeyCode.VcLeftControl);
-            Thread.Sleep(25);
-            _simulator.SimulateKeyPress(KeyCode.VcV);
-            Thread.Sleep(25);
-            _simulator.SimulateKeyRelease(KeyCode.VcV);
-            Thread.Sleep(25);
-            _simulator.SimulateKeyRelease(KeyCode.VcLeftControl);
-        }
-
-        public void Dispose()
-        {
-            Stop();
-        }
+        /// <summary>Ctrl+Shift+Left: selects the word before the caret.</summary>
+        void SimulateSelectWordLeft();
     }
 }

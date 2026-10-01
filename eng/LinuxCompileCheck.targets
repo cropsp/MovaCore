@@ -1,0 +1,12 @@
+<Project>
+  <!--
+    Compile-check the WinForms app on Linux with a distro .NET SDK that lacks Microsoft.NET.Sdk.WindowsDesktop.
+    Only for catching compiler errors/warnings: the output is not runnable and says nothing about Native AOT.
+
+    dotnet build MovaCore.csproj -p:EnableWindowsTargeting=true -p:ImportWindowsDesktopTargets=false
+                 -p:CustomAfterMicrosoftCommonTargets=$PWD/eng/LinuxCompileCheck.targets
+  -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
+  </ItemGroup>
+</Project>
