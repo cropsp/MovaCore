@@ -7,10 +7,12 @@ namespace MovaCore.Services
 {
     public class LayoutConverterService : ILayoutConverterService
     {
-        // Characters produced by the same physical key in the standard Windows "US" and "Ukrainian" layouts:
+        // Characters typed by the same physical key in the Windows "US" and "Ukrainian (Enhanced)" layouts:
         // DefaultEnglishKeys[i] <-> DefaultUkrainianKeys[i]. Used when the installed layouts cannot be read.
-        public const string DefaultEnglishKeys = "qwertyuiop[]asdfghjkl;'zxcvbnm,./QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?@#$^&|`~";
-        public const string DefaultUkrainianKeys = "йцукенгшщзхїфівапролджєячсмитьбю.ЙЦУКЕНГШЩЗХЇФІВАПРОЛДЖЄЯЧСМИТЬБЮ,\"№;:?/'₴";
+        // The older "Ukrainian" layout differs on two keys: ё/Ё instead of '/₴ on the backtick key, and \// instead of
+        // ґ/Ґ on the backslash key; reading the installed layouts (KeyboardLayouts) covers it.
+        public const string DefaultEnglishKeys = "qwertyuiop[]asdfghjkl;'zxcvbnm,./QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?@#$^&\\|`~";
+        public const string DefaultUkrainianKeys = "йцукенгшщзхїфівапролджєячсмитьбю.ЙЦУКЕНГШЩЗХЇФІВАПРОЛДЖЄЯЧСМИТЬБЮ,\"№;:?ґҐ'₴";
 
         private readonly Dictionary<char, char> _enToUa = new();
         private readonly Dictionary<char, char> _uaToEn = new();

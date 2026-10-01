@@ -83,7 +83,8 @@ The conversion pipeline runs across these files:
    counting characters that exist in only one layout; applying a single map to the whole string keeps conversion
    reversible (`Convert(Convert(s)) == s`); `TargetOf` tells which language the result is in. `KeyboardLayouts`
    (Windows-only) builds the key pairs from the installed English and Ukrainian layouts with `ToUnicodeEx`, and
-   `LayoutTableBuilder` turns them into tables, filling gaps from the built-in US/Ukrainian ones. The paired strings
+   `LayoutTableBuilder` turns them into tables, filling gaps from the built-in US/"Ukrainian (Enhanced)" ones (the
+   smoke test checks the built-in tables against the real layout files). The paired strings
    must stay the same length without duplicates; the constructor throws otherwise. It also switches the foreground
    window's layout (`WM_INPUTLANGCHANGEREQUEST`).
 

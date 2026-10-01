@@ -60,20 +60,23 @@ namespace MovaCore.Tests
         [Fact]
         public void Build_IdenticalCharacters_AreSkipped()
         {
-            var tables = LayoutTableBuilder.Build(new[] { ('1', '1'), ('0', '0'), ('\\', '\\'), ('!', '!') });
+            var tables = LayoutTableBuilder.Build(new[] { ('1', '1'), ('0', '0'), ('!', '!') });
 
             Assert.Equal(BuiltIn, tables);
             Assert.DoesNotContain('1', tables.EnglishKeys);
             Assert.DoesNotContain('1', tables.UkrainianKeys);
         }
 
-        // A skipped identical pair must not reserve the character: 'a' can still be paired by a later key
+        // A key typing the same character in both layouts claims it: neither a later key nor a built-in pair maps it
         [Fact]
-        public void Build_IdenticalPair_DoesNotReserveTheCharacter()
+        public void Build_IdenticalPair_ReservesTheCharacter()
         {
             var tables = LayoutTableBuilder.Build(new[] { ('a', 'a'), ('a', 'ж') });
 
-            Assert.Equal('ж', EnglishToUkrainian(tables)['a']);
+            AssertNoDuplicates(tables);
+            Dictionary<char, char> pairs = EnglishToUkrainian(tables);
+            Assert.False(pairs.ContainsKey('a'));
+            Assert.Equal('ж', pairs[';']);
         }
 
         [Fact]
@@ -140,8 +143,8 @@ namespace MovaCore.Tests
         public void Build_RandomPairs_NeverYieldDuplicatesOrIdenticalPairs()
         {
             // Characters of the built-in tables (so the input conflicts with the fill-in pairs) plus digits and ґ
-            string english = LayoutConverterService.DefaultEnglishKeys + "0123\\";
-            string ukrainian = LayoutConverterService.DefaultUkrainianKeys + "0123ґҐ\\";
+            string english = LayoutConverterService.DefaultEnglishKeys + "0123ё";
+            string ukrainian = LayoutConverterService.DefaultUkrainianKeys + "0123ёЁ\\/";
             var random = new Random(7);
             (char English, char Ukrainian)[] builtIn = BuiltInPairs();
 
@@ -166,111 +169,104 @@ namespace MovaCore.Tests
                 foreach (var (en, ua) in pairs)
                     Assert.True(input.Contains((en, ua)) || builtIn.Contains((en, ua)), $"{context}: unexpected pair '{en}' <-> '{ua}'");
 
-                // Every input and built-in pair is either taken or blocked by a character that is already used
+                // Every input and built-in pair is either taken or blocked by a character that is already used,
+                // either by another pair or by an input key that types the same character in both layouts
+                var claimedByIdentity = input.Where(p => p.English == p.Ukrainian).Select(p => p.English).ToHashSet();
                 foreach (var (en, ua) in input.Concat(builtIn).Where(p => p.English != p.Ukrainian))
                 {
                     bool taken = pairs.TryGetValue(en, out char paired) && paired == ua;
-                    bool blocked = tables.EnglishKeys.Contains(en) || tables.UkrainianKeys.Contains(ua);
+                    bool blocked = tables.EnglishKeys.Contains(en) || tables.UkrainianKeys.Contains(ua)
+                        || claimedByIdentity.Contains(en) || claimedByIdentity.Contains(ua);
                     Assert.True(taken || blocked, $"{context}: pair '{en}' <-> '{ua}' was dropped without a conflict");
                 }
 
-                // The first usable input pair is always accepted
-                var usable = input.Where(p => p.English != p.Ukrainian).ToList();
-                if (usable.Count > 0)
-                    Assert.Equal(usable[0].Ukrainian, pairs[usable[0].English]);
+                // The first input pair is always accepted unless it is an identity pair
+                if (input.Count > 0 && input[0].English != input[0].Ukrainian)
+                    Assert.Equal(input[0].Ukrainian, pairs[input[0].English]);
             }
         }
 
-        // "Ukrainian (Enhanced)" types ґ/Ґ on the backslash key instead of '\' and '|'. The standard Ukrainian layout
-        // types '/' on Shift+backslash, which the built-in tables pair with '|'.
-        private static List<(char English, char Ukrainian)> EnhancedLayoutPairs(bool withShiftedBackslash = true)
+        // The older "Ukrainian" layout: ё/Ё on the backtick key, and the backslash key types '\' and '/'
+        private static List<(char English, char Ukrainian)> StandardLayoutPairs()
         {
             var pairs = BuiltInPairs().Where(p => char.IsLetter(p.English)).ToList();
-            pairs.Add(('\\', 'ґ'));
-            if (withShiftedBackslash)
-                pairs.Add(('|', 'Ґ'));
+            pairs.Add(('`', 'ё'));
+            pairs.Add(('~', 'Ё'));
+            pairs.Add(('\\', '\\'));
+            pairs.Add(('|', '/'));
             return pairs;
         }
 
         [Fact]
-        public void Build_EnhancedLayout_PairsTheBackslashKeyWithGhe()
+        public void Build_StandardLayout_KeepsItsOwnBacktickAndBackslashKeys()
         {
-            var tables = LayoutTableBuilder.Build(EnhancedLayoutPairs());
+            var tables = LayoutTableBuilder.Build(StandardLayoutPairs());
 
             AssertNoDuplicates(tables);
             Dictionary<char, char> pairs = EnglishToUkrainian(tables);
-            Assert.Equal('ґ', pairs['\\']);
+            Assert.Equal('ё', pairs['`']);
+            Assert.Equal('Ё', pairs['~']);
+            Assert.Equal('/', pairs['|']);
+
+            // '\' types '\' in both layouts: no mapping, and the built-in ґ pairing is not filled in for it
+            Assert.False(pairs.ContainsKey('\\'));
+            Assert.DoesNotContain('ґ', tables.UkrainianKeys);
+            Assert.DoesNotContain('Ґ', tables.UkrainianKeys);
+        }
+
+        [Fact]
+        public void Build_IdentityPair_BlocksOnlyThePairsOfItsCharacter()
+        {
+            var tables = LayoutTableBuilder.Build(new[] { ('\\', '\\') });
+
+            AssertNoDuplicates(tables);
+            Dictionary<char, char> pairs = EnglishToUkrainian(tables);
+            Assert.False(pairs.ContainsKey('\\'));
             Assert.Equal('Ґ', pairs['|']);
         }
 
-        // English '|' is already used by Ґ, so the built-in ('|', '/') pair is dropped, and '/' stays unpaired
-        [Fact]
-        public void Build_EnhancedLayout_DropsTheBuiltInPairOfTheShiftedBackslashKey()
-        {
-            var tables = LayoutTableBuilder.Build(EnhancedLayoutPairs());
-
-            Dictionary<char, char> pairs = EnglishToUkrainian(tables);
-            Assert.DoesNotContain('/', tables.UkrainianKeys);
-            Assert.DoesNotContain(pairs, p => p.Value == '/');
-            Assert.Single(tables.EnglishKeys, '|');
-
-            // The '/' key itself is not affected
-            Assert.Equal('.', pairs['/']);
-            Assert.Equal(',', pairs['?']);
-        }
-
-        [Fact]
-        public void Build_OnlyTheBackslashKeyIsEnhanced_ShiftedBackslashKeepsTheBuiltInPair()
-        {
-            var tables = LayoutTableBuilder.Build(EnhancedLayoutPairs(withShiftedBackslash: false));
-
-            AssertNoDuplicates(tables);
-            Dictionary<char, char> pairs = EnglishToUkrainian(tables);
-            Assert.Equal('ґ', pairs['\\']);
-            Assert.Equal('/', pairs['|']);
-        }
-
-        // Ukrainian '/' is used by another key, so the built-in ('|', '/') pair would pair '/' twice and is dropped
+        // Ukrainian Ґ is used by another key, so the built-in ('|', 'Ґ') pair would pair Ґ twice and is dropped
         [Fact]
         public void Build_UkrainianCharacterAlreadyUsedByAnotherKey_DropsTheBuiltInPair()
         {
-            var tables = LayoutTableBuilder.Build(new[] { ('&', '/') });
+            var tables = LayoutTableBuilder.Build(new[] { ('&', 'Ґ') });
 
             AssertNoDuplicates(tables);
             Dictionary<char, char> pairs = EnglishToUkrainian(tables);
-            Assert.Equal('/', pairs['&']);
+            Assert.Equal('Ґ', pairs['&']);
             Assert.False(pairs.ContainsKey('|'));
-            Assert.Single(tables.UkrainianKeys, '/');
+            Assert.Single(tables.UkrainianKeys, 'Ґ');
             Assert.DoesNotContain('?', tables.UkrainianKeys);
         }
 
         [Fact]
-        public void Build_EnhancedLayout_ConvertsGheAndStaysReversible()
+        public void BuiltInTables_ConvertGheAndStayReversible()
         {
-            var (english, ukrainian) = LayoutTableBuilder.Build(EnhancedLayoutPairs());
-            var converter = new LayoutConverterService(english, ukrainian);
+            var converter = new LayoutConverterService();
 
             // ґ = '\', а = f, н = y, о = j, к = r
             Assert.Equal("ґанок", converter.Convert("\\fyjr"));
             Assert.Equal("Ґанок", converter.Convert("|fyjr"));
-            Assert.Equal("привіт", converter.Convert("ghbdsn"));
-
             Assert.Equal("\\fyjr", converter.Convert("ґанок"));
             Assert.Equal("|fyjr", converter.Convert("Ґанок"));
 
-            foreach (string text in new[] { "\\fyjr", "|fyjr", "ґанок", "Ґанок", "ґрунт.", "\\heyn/", "ghbdsn\\", "Ґ" })
+            foreach (string text in new[] { "\\fyjr", "|fyjr", "ґанок", "Ґанок", "ґрунт.", "ghbdsn\\", "Ґ" })
                 Assert.Equal(text, converter.Convert(converter.Convert(text)));
-        }
-
-        [Fact]
-        public void Build_EnhancedLayout_ConverterTargetsFollowTheNewCharacters()
-        {
-            var (english, ukrainian) = LayoutTableBuilder.Build(EnhancedLayoutPairs());
-            var converter = new LayoutConverterService(english, ukrainian);
 
             // ґ exists only in the Ukrainian layout and '\' only in the English one, so each decides the direction
             Assert.Equal(KeyboardLanguage.English, converter.TargetOf("ґ"));
             Assert.Equal(KeyboardLanguage.Ukrainian, converter.TargetOf("\\"));
+        }
+
+        [Fact]
+        public void Build_StandardLayout_ConvertsYoAndStaysReversible()
+        {
+            var (english, ukrainian) = LayoutTableBuilder.Build(StandardLayoutPairs());
+            var converter = new LayoutConverterService(english, ukrainian);
+
+            Assert.Equal("привіт", converter.Convert("ghbdsn"));
+            Assert.Equal("ё", converter.Convert("`"));
+            Assert.Equal("a\\b", converter.Convert(converter.Convert("a\\b")));
         }
     }
 }

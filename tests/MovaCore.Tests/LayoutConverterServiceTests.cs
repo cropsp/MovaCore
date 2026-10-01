@@ -55,7 +55,7 @@ namespace MovaCore.Tests
         [Fact]
         public void Convert_RoundTrip_HoldsForRandomEnglishLayoutStrings()
         {
-            const string alphabet = "qwertyuiop[]asdfghjkl;'zxcvbnm,./QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?@#$^&|`~ 0123-";
+            const string alphabet = "qwertyuiop[]asdfghjkl;'zxcvbnm,./QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?@#$^&\\|`~ 0123-";
             const string latinLetters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
             AssertRoundTripHolds(alphabet, latinLetters);
@@ -64,7 +64,7 @@ namespace MovaCore.Tests
         [Fact]
         public void Convert_RoundTrip_HoldsForRandomUkrainianLayoutStrings()
         {
-            const string alphabet = "йцукенгшщзхїфівапролджєячсмитьбю.ЙЦУКЕНГШЩЗХЇФІВАПРОЛДЖЄЯЧСМИТЬБЮ,\"№;:?/'₴ 0123-";
+            const string alphabet = "йцукенгшщзхїфівапролджєячсмитьбю.ЙЦУКЕНГШЩЗХЇФІВАПРОЛДЖЄЯЧСМИТЬБЮ,\"№;:?ґҐ'₴ 0123-";
             string cyrillicLetters = new string(alphabet.Where(c => char.IsLetter(c) && c > 127).ToArray());
 
             AssertRoundTripHolds(alphabet, cyrillicLetters);

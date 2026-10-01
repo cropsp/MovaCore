@@ -95,7 +95,7 @@ namespace MovaCore
         }
 
         // The converter reads the user's installed layouts; check that reading against the real layout files.
-        // "Ukrainian" must reproduce the built-in table, "Ukrainian (Enhanced)" must add ґ.
+        // "Ukrainian (Enhanced)" must reproduce the built-in table; the older "Ukrainian" must convert correctly too.
         private static void CheckKeyboardLayouts()
         {
             var installedBefore = new HashSet<IntPtr>(KeyboardLayouts.GetInstalled());
@@ -110,35 +110,34 @@ namespace MovaCore
                     return;
                 }
 
-                var standardPairs = new HashSet<(char, char)>(KeyboardLayouts.ReadKeyPairs(us, ukrainian));
+                var enhancedPairs = new HashSet<(char, char)>(KeyboardLayouts.ReadKeyPairs(us, enhanced));
+                var standardPairs = KeyboardLayouts.ReadKeyPairs(us, ukrainian);
                 var mismatches = new List<string>();
                 for (int i = 0; i < LayoutConverterService.DefaultEnglishKeys.Length; i++)
                 {
                     char en = LayoutConverterService.DefaultEnglishKeys[i];
                     char ua = LayoutConverterService.DefaultUkrainianKeys[i];
-                    if (standardPairs.Contains((en, ua))) continue;
+                    if (enhancedPairs.Contains((en, ua))) continue;
 
                     // Show what the real layout types on that key, as code points (some are look-alike characters)
                     var actual = new List<string>();
-                    foreach (var (pairEn, pairUa) in standardPairs)
+                    foreach (var (pairEn, pairUa) in enhancedPairs)
                     {
                         if (pairEn == en) actual.Add($"U+{(int)pairUa:X4}");
                     }
                     mismatches.Add($"{en}->{ua} (layout types {(actual.Count > 0 ? string.Join("/", actual) : "nothing")})");
                 }
                 if (mismatches.Count > 0)
-                    AppLog.Error("Smoke test: built-in pairs not typed by the real US/Ukrainian layouts: " + string.Join("; ", mismatches));
+                    AppLog.Error("Smoke test: built-in pairs not typed by the real US/Ukrainian (Enhanced) layouts: " +
+                        string.Join("; ", mismatches));
 
                 var (englishKeys, ukrainianKeys) = LayoutTableBuilder.Build(standardPairs);
-                if (new LayoutConverterService(englishKeys, ukrainianKeys).Convert("ghbdsn") != "привіт")
-                    AppLog.Error("Smoke test: the tables read from the layouts convert incorrectly");
+                var standardConverter = new LayoutConverterService(englishKeys, ukrainianKeys);
+                if (standardConverter.Convert("ghbdsn") != "привіт" || standardConverter.Convert("`") != "ё"
+                    || standardConverter.Convert("\\") != "\\")
+                    AppLog.Error("Smoke test: the tables read from the \"Ukrainian\" layout convert incorrectly");
 
-                List<(char English, char Ukrainian)> enhancedPairs = KeyboardLayouts.ReadKeyPairs(us, enhanced);
-                var ghe = enhancedPairs.FindAll(p => p.Ukrainian is 'ґ' or 'Ґ');
-                if (ghe.Count == 0)
-                    AppLog.Error("Smoke test: \"Ukrainian (Enhanced)\" did not yield ґ");
-                AppLog.Info($"Smoke test: layouts read ({standardPairs.Count} standard pairs; ґ/Ґ on " +
-                    string.Join(", ", ghe.ConvertAll(p => $"'{p.English}'")) + ")");
+                AppLog.Info($"Smoke test: layouts read ({enhancedPairs.Count} enhanced, {standardPairs.Count} standard pairs)");
             }
             finally
             {

@@ -18,9 +18,19 @@ namespace MovaCore.Services
 
             void TryAdd(char en, char ua)
             {
-                // Identical characters need no mapping, and a character produced by two keys (e.g. '\' on both
-                // backslash keys) keeps its first pairing, so each map stays the inverse of the other
-                if (en == ua || usedEnglish.Contains(en) || usedUkrainian.Contains(ua)) return;
+                // A character produced by two keys (e.g. '\' on both backslash keys) keeps its first pairing, so each
+                // map stays the inverse of the other
+                if (usedEnglish.Contains(en) || usedUkrainian.Contains(ua)) return;
+
+                // A key typing the same character in both layouts needs no mapping, but it still claims the character:
+                // otherwise a built-in pair (e.g. '\' -> ґ) would be filled in for a layout that types '\' there
+                if (en == ua)
+                {
+                    usedEnglish.Add(en);
+                    usedUkrainian.Add(ua);
+                    return;
+                }
+
                 english.Append(en);
                 ukrainian.Append(ua);
                 usedEnglish.Add(en);

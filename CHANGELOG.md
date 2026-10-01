@@ -12,6 +12,7 @@ All notable changes to MovaCore are documented here. The format follows
 - Converting twice did not return the original text for `? / " , . : ;` (e.g. `Так?` → `Nfr,` → `Такб`).
 - If the clipboard was locked, stale clipboard content could be pasted over the selection.
 - F13–F24 could not be recorded as the hotkey, and pressing the current hotkey while recording started a conversion.
+- Switching the keyboard layout (Alt+Shift, Win+Space) while a MovaCore window was focused raised an error.
 - A plain F10 hotkey also swallowed Shift+F10 and Ctrl+F10.
 
 ### Added
@@ -23,8 +24,9 @@ All notable changes to MovaCore are documented here. The format follows
 - "Pause" in the tray menu, and a list of applications in which the hotkey is left alone.
 - Ctrl+Insert / Shift+Insert as an alternative to Ctrl+C / Ctrl+V (safer in terminals).
 - Optional: with nothing selected, convert the word before the caret (off by default).
-- Conversion tables are read from the installed layouts, so "Ukrainian (Enhanced)" with ґ and non-US English
-  layouts work.
+- Conversion tables are read from the installed layouts, so non-US English layouts and both Ukrainian layouts work.
+  The built-in tables now match "Ukrainian (Enhanced)" exactly (ґ/Ґ on the backslash key); v1.0.0 mixed it with
+  the older "Ukrainian" layout.
 - Ukrainian user interface, "About" with a link to the releases page, single-instance protection, a log file in
   `%LOCALAPPDATA%\MovaCore\logs`, ARM64 builds.
 
