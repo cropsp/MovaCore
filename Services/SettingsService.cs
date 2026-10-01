@@ -2,10 +2,10 @@ using System;
 using System.IO;
 using System.Text.Json;
 using System.Windows.Forms;
-using LayoutConverter.App.Models;
 using Microsoft.Win32;
+using MovaCore.Models;
 
-namespace LayoutConverter.App.Services
+namespace MovaCore.Services
 {
     public class SettingsService
     {
@@ -76,15 +76,6 @@ namespace LayoutConverter.App.Services
             {
                 AppLog.Error("Could not update the autostart registry entry", ex);
             }
-        }
-    }
-
-    // Helper to avoid issues with File.WriteAllText in some environments
-    internal static class FileExtensions
-    {
-        public static void WriteText(string path, string text)
-        {
-            File.WriteAllText(path, text);
         }
     }
 }

@@ -11,11 +11,14 @@
        so the platform-neutral service sources are compiled in directly. -->
   <ItemGroup>
     <Compile Include="../../Services/ILayoutConverterService.cs" Link="Linked/ILayoutConverterService.cs" />
+    <Compile Include="../../Services/LayoutConverterService.cs" Link="Linked/LayoutConverterService.cs" />
     <Compile Include="../../Services/HotkeyOrchestrator.cs" Link="Linked/HotkeyOrchestrator.cs" />
     <Compile Include="../../Services/IHotkeyService.cs" Link="Linked/IHotkeyService.cs" />
-    <Compile Include="../../Services/ClipboardService.cs" Link="Linked/ClipboardService.cs" />
+    <Compile Include="../../Services/IClipboardService.cs" Link="Linked/IClipboardService.cs" />
     <Compile Include="../../Services/AppLog.cs" Link="Linked/AppLog.cs" />
+    <Compile Include="../../Services/FileLog.cs" Link="Linked/FileLog.cs" />
     <Compile Include="../../Models/AppSettings.cs" Link="Linked/AppSettings.cs" />
+    <Compile Include="../../Models/SettingsJsonContext.cs" Link="Linked/SettingsJsonContext.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -2,11 +2,11 @@ using System;
 using System.Drawing;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using LayoutConverter.App.Models;
-using LayoutConverter.App.Services;
-using LayoutConverter.App.UI;
+using MovaCore.Models;
+using MovaCore.Services;
+using MovaCore.UI;
 
-namespace LayoutConverter.App
+namespace MovaCore
 {
     public class TrayApplicationContext : ApplicationContext
     {
@@ -40,11 +40,11 @@ namespace LayoutConverter.App
             };
 
             // Subscribe to debug notifications
-            _orchestrator.ConversionCompleted += OnConversionCompleted;
+            _orchestrator.ConversionFailed += OnConversionFailed;
 
             // Start Hotkey Service
-            _hotkeyService.Start();
             _hotkeyService.HotkeyTriggered += OnHotkeyTriggered;
+            _hotkeyService.Start();
         }
 
         private void ApplySettings()
@@ -65,7 +65,7 @@ namespace LayoutConverter.App
             }
         }
 
-        private void OnConversionCompleted(object? sender, string message)
+        private void OnConversionFailed(object? sender, string message)
         {
             if (_currentSettings.ShowNotifications && !string.IsNullOrEmpty(message))
             {
@@ -118,7 +118,7 @@ namespace LayoutConverter.App
         {
             if (disposing)
             {
-                _orchestrator.ConversionCompleted -= OnConversionCompleted;
+                _orchestrator.ConversionFailed -= OnConversionFailed;
                 _notifyIcon?.Dispose();
                 _trayIcon?.Dispose();
                 _hotkeyService?.Dispose();

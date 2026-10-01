@@ -5,10 +5,10 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using LayoutConverter.App.Services;
 using Microsoft.Extensions.DependencyInjection;
+using MovaCore.Services;
 
-namespace LayoutConverter.App
+namespace MovaCore
 {
     internal static class Program
     {

@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace LayoutConverter.App.Services
+namespace MovaCore.Services
 {
     public class HotkeyOrchestrator
     {
@@ -14,7 +14,7 @@ namespace LayoutConverter.App.Services
         // 0 = idle, 1 = busy. Interlocked because every hotkey press starts on its own thread-pool thread.
         private int _isProcessing;
 
-        public event EventHandler<string>? ConversionCompleted;
+        public event EventHandler<string>? ConversionFailed;
 
         /// <summary>How long to wait for the foreground app to put the selection on the clipboard.</summary>
         internal TimeSpan CopyTimeout { get; init; } = TimeSpan.FromSeconds(1);
@@ -47,13 +47,13 @@ namespace LayoutConverter.App.Services
                 if (string.IsNullOrWhiteSpace(capturedText)) return;
 
                 // 3. Convert and paste back
-                string converted = await _converterService.ConvertAsync(capturedText);
+                string converted = _converterService.Convert(capturedText);
                 if (converted == capturedText) return;
 
                 if (!await _clipboardService.TrySetTextAsync(converted))
                 {
                     AppLog.Error("Could not put the converted text on the clipboard");
-                    ConversionCompleted?.Invoke(this, "Could not put the converted text on the clipboard. Please try again.");
+                    ConversionFailed?.Invoke(this, "Could not put the converted text on the clipboard. Please try again.");
                     return;
                 }
 
@@ -64,7 +64,7 @@ namespace LayoutConverter.App.Services
             {
                 // Never log the text itself: it is the user's clipboard content
                 AppLog.Error("Conversion failed", ex);
-                ConversionCompleted?.Invoke(this, $"System Error: {ex.Message}");
+                ConversionFailed?.Invoke(this, $"System Error: {ex.Message}");
             }
             finally
             {

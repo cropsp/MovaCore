@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using LayoutConverter.App.Services;
+using MovaCore.Services;
 using Xunit;
 
 namespace MovaCore.Tests
@@ -19,7 +19,7 @@ namespace MovaCore.Tests
             {
                 CopyTimeout = TimeSpan.FromMilliseconds(200)
             };
-            _orchestrator.ConversionCompleted += (_, message) => _messages.Add(message);
+            _orchestrator.ConversionFailed += (_, message) => _messages.Add(message);
         }
 
         [Fact]

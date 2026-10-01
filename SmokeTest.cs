@@ -1,11 +1,11 @@
 using System;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using LayoutConverter.App.Models;
-using LayoutConverter.App.Services;
-using LayoutConverter.App.UI;
+using MovaCore.Models;
+using MovaCore.Services;
+using MovaCore.UI;
 
-namespace LayoutConverter.App
+namespace MovaCore
 {
     /// <summary>
     /// <c>MovaCore.exe --smoke-test</c>: runs the real tray app for a few seconds, exercises the code paths that Native
@@ -61,7 +61,7 @@ namespace LayoutConverter.App
 
         private static async Task CheckConverterAndClipboardAsync(IClipboardService clipboard, ILayoutConverterService converter)
         {
-            string converted = await converter.ConvertAsync("ghbdsn");
+            string converted = converter.Convert("ghbdsn");
             if (converted != "привіт")
                 AppLog.Error("Smoke test: unexpected conversion result");
 

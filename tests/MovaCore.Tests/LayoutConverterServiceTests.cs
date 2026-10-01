@@ -1,8 +1,7 @@
 using System;
 using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
-using LayoutConverter.App.Services;
+using MovaCore.Services;
 using Xunit;
 
 namespace MovaCore.Tests
@@ -29,9 +28,9 @@ namespace MovaCore.Tests
         [InlineData("12345", "12345")]
         [InlineData("   ", "   ")]
         [InlineData("", "")]
-        public async Task ConvertAsync_ReturnsExpected(string input, string expected)
+        public void Convert_ReturnsExpected(string input, string expected)
         {
-            string actual = await Converter.ConvertAsync(input);
+            string actual = Converter.Convert(input);
 
             Assert.Equal(expected, actual);
         }
@@ -44,35 +43,35 @@ namespace MovaCore.Tests
         [InlineData("Так?")]
         [InlineData("моє")]
         [InlineData("Привіт, світ.")]
-        public async Task ConvertAsync_RoundTrip_ReturnsOriginal(string input)
+        public void Convert_RoundTrip_ReturnsOriginal(string input)
         {
-            string once = await Converter.ConvertAsync(input);
-            string twice = await Converter.ConvertAsync(once);
+            string once = Converter.Convert(input);
+            string twice = Converter.Convert(once);
 
             Assert.Equal(input, twice);
         }
 
         [Fact]
-        public async Task ConvertAsync_RoundTrip_HoldsForRandomEnglishLayoutStrings()
+        public void Convert_RoundTrip_HoldsForRandomEnglishLayoutStrings()
         {
             const string alphabet = "qwertyuiop[]asdfghjkl;'zxcvbnm,./QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?@#$^&|`~ 0123-";
             const string latinLetters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
-            await AssertRoundTripHoldsAsync(alphabet, latinLetters);
+            AssertRoundTripHolds(alphabet, latinLetters);
         }
 
         [Fact]
-        public async Task ConvertAsync_RoundTrip_HoldsForRandomUkrainianLayoutStrings()
+        public void Convert_RoundTrip_HoldsForRandomUkrainianLayoutStrings()
         {
             const string alphabet = "йцукенгшщзхїфівапролджєячсмитьбю.ЙЦУКЕНГШЩЗХЇФІВАПРОЛДЖЄЯЧСМИТЬБЮ,\"№;:?/'₴ 0123-";
             string cyrillicLetters = new string(alphabet.Where(c => char.IsLetter(c) && c > 127).ToArray());
 
-            await AssertRoundTripHoldsAsync(alphabet, cyrillicLetters);
+            AssertRoundTripHolds(alphabet, cyrillicLetters);
         }
 
         // Every generated string contains at least one letter from `guaranteedLetters`, so it always has
         // a layout-specific character and the direction is unambiguous.
-        private static async Task AssertRoundTripHoldsAsync(string alphabet, string guaranteedLetters)
+        private static void AssertRoundTripHolds(string alphabet, string guaranteedLetters)
         {
             const int iterations = 2000;
             var random = new Random(1);
@@ -88,8 +87,8 @@ namespace MovaCore.Tests
                 sb.Insert(random.Next(sb.Length + 1), letter);
 
                 string original = sb.ToString();
-                string converted = await Converter.ConvertAsync(original);
-                string roundTripped = await Converter.ConvertAsync(converted);
+                string converted = Converter.Convert(original);
+                string roundTripped = Converter.Convert(converted);
 
                 Assert.True(
                     roundTripped == original,

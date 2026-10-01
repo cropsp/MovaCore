@@ -1,7 +1,7 @@
 using System.Drawing;
 using System.IO;
 
-namespace LayoutConverter.App
+namespace MovaCore
 {
     /// <summary>
     /// Icon and logo embedded into the executable (see the EmbeddedResource items in MovaCore.csproj),

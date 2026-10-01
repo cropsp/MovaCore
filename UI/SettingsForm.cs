@@ -2,11 +2,11 @@ using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.Windows.Forms;
-using LayoutConverter.App.Models;
-using LayoutConverter.App.Services;
+using MovaCore.Models;
+using MovaCore.Services;
 using SharpHook.Data;
 
-namespace LayoutConverter.App.UI
+namespace MovaCore.UI
 {
     public class SettingsForm : Form
     {
