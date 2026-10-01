@@ -7,8 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 MovaCore is a Windows-only system-tray utility that converts selected text typed in the wrong keyboard layout
 (EN ↔ UA, e.g. `ghbdsn` → `привіт`) when the user presses a global hotkey (default F10). It is written in C# on
 .NET 10 WinForms and shipped as a Native AOT `MovaCore.exe` plus SharpHook's native `uiohook.dll`, which Native AOT
-cannot embed, so releases are zip archives. The root namespace is still `LayoutConverter.App`
-(the old project name), not `MovaCore`.
+cannot embed, so releases are zip archives. The root namespace is `MovaCore`.
 
 A prioritized review of known bugs and the roadmap lives in `docs/IMPROVEMENT_PLAN.md` (in Ukrainian); check it
 before changing behaviour, since many "odd" things in the code are already catalogued there.
@@ -42,50 +41,61 @@ creates a draft release with zip archives and SHA256 sums.
 
 ## Architecture
 
-The whole app is one conversion pipeline wired through `Microsoft.Extensions.DependencyInjection` in `Program.cs`
-(all singletons). Understanding it requires following these files:
+`Program.cs` is the composition root: a handful of long-lived objects wired by hand (no DI container). It also owns
+process-wide concerns: the log (`Services/AppLog.cs`, `%LOCALAPPDATA%\MovaCore\logs`, one rotated file), handlers for
+unhandled exceptions, the single-instance mutex, and an up-front check that `uiohook.dll` loads. Never log clipboard
+text or keystrokes. `SmokeTest.cs` counts on `AppLog.ErrorCount`, so report failures through `AppLog.Error` rather
+than swallowing them.
 
-1. **`Services/IHotkeyService.cs` → `HotkeyService`** runs a SharpHook `SimpleGlobalHook` on a thread-pool thread.
-   It suppresses both press and release of the trigger key and raises `HotkeyTriggered` on *release*.
+The conversion pipeline runs across these files:
+
+1. **`Services/HotkeyService.cs`** runs a keyboard-only SharpHook `SimpleGlobalHook` via `RunAsync` on a background
+   thread. It suppresses both press and release of the trigger key and raises `HotkeyTriggered` on *release*.
    Hook callbacks run synchronously on the hook thread: `e.SuppressEvent` must be set there, and handlers must return
-   fast. The same class simulates Ctrl+C / Ctrl+V via SharpHook's `EventSimulator`.
+   fast. `Stop` keeps the hook reusable (it waits until the hook thread has really stopped); `HookFailed` reports a
+   hook that cannot start. The same class simulates Ctrl+C / Ctrl+V, first releasing only the modifiers that are
+   physically held.
 2. **`TrayApplicationContext.cs`** owns the tray icon, the settings dialog and the lifetime. It forwards
-   `HotkeyTriggered` to the orchestrator via `Task.Run`, so conversion never runs on the UI or hook thread.
-3. **`Services/HotkeyOrchestrator.cs`** performs the clipboard round-trip: remember the clipboard sequence number →
-   simulate Ctrl+C → wait (up to `CopyTimeout`, 1 s) for the sequence number to change → read text → convert →
-   write clipboard → simulate Ctrl+V. It never clears the clipboard: if the number does not change, nothing was
-   selected and it stops, so stale clipboard content can never be pasted. A second hotkey press while a conversion
-   is running is dropped (`Interlocked` busy flag). Errors are reported through the `ConversionCompleted` event
-   (despite the name, it fires only on errors), shown as a tray balloon, and written to the log.
-4. **`Services/ClipboardService.cs`** talks to the clipboard with raw Win32 P/Invoke (`OpenClipboard`,
-   `GlobalAlloc`, `CF_UNICODETEXT`, `GetClipboardSequenceNumber`), retrying only while another app holds the
-   clipboard open, deliberately avoiding `System.Windows.Forms.Clipboard` (COM/STA issues). `TryGetTextAsync`
-   returns null when there is no text; `TrySetTextAsync` returns false instead of failing silently.
-5. **`Services/ILayoutConverterService.cs`** holds two one-way maps (EN→UA, UA→EN) built from the paired
+   `HotkeyTriggered` to the orchestrator via `Task.Run`, so conversion never runs on the UI or hook thread, and it
+   marshals worker-thread events (`ConversionFailed`, `HookFailed`) back to the UI thread before touching `NotifyIcon`.
+3. **`Services/HotkeyOrchestrator.cs`** performs the clipboard round-trip: capture a snapshot of the user's clipboard →
+   simulate Ctrl+C → wait (up to `CopyTimeout`) for the clipboard sequence number to change → read and convert →
+   put the converted text on the clipboard → simulate Ctrl+V → wait until the target app reads it → restore the
+   snapshot. If the sequence number does not change, nothing was selected and the clipboard is left alone. The
+   snapshot is restored only after the paste is observed: restoring earlier would paste the old content instead.
+   A second hotkey press while a conversion runs is dropped (`Interlocked` busy flag). `ConversionFailed` reports
+   errors (a tray balloon) in addition to the log.
+4. **`Services/ClipboardService.cs`** is raw Win32 P/Invoke (`LibraryImport`), deliberately not
+   `System.Windows.Forms.Clipboard` (COM/STA issues). A message-only `NativeWindow` created on the UI thread owns
+   everything we put on the clipboard. Converted text is offered with *delayed rendering*, so the window gets
+   `WM_RENDERFORMAT` when an app pastes it (`WaitForTextReadAsync`). Our writes carry the
+   `ExcludeClipboardContentFromMonitorProcessing` family of formats, so Win+V history and clipboard managers ignore
+   them. Snapshots keep only a whitelist of formats (text, HTML, RTF, DIB, file lists) up to 32 MB. A restore happens
+   only if the clipboard still holds our text or is unchanged since the copy. Clipboard calls on other threads wait
+   for the UI thread to answer window messages, so never block the UI thread on this service's tasks.
+5. **`Services/LayoutConverterService.cs`** holds two one-way maps (EN→UA, UA→EN) built from the paired
    `EnKeys`/`UaKeys` strings (same physical key at the same index). The direction is chosen once per string by
    counting characters that exist in only one layout; applying a single map to the whole string keeps conversion
    reversible (`Convert(Convert(s)) == s`). The paired strings must stay the same length without duplicates; the
    static constructor throws otherwise.
 
-Settings: `SettingsService` is *not* registered in DI; `TrayApplicationContext` creates it directly. It stores
-`Models/AppSettings` as JSON in `%APPDATA%\MovaCore\settings.json` and toggles autostart via
-`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. `UI/SettingsForm.cs` is built in code (no designer file) and
-maps WinForms `Keys` to SharpHook `KeyCode` by hand.
-
-`Program.cs` also owns process-wide concerns: the log (`Services/AppLog.cs`, `%LOCALAPPDATA%\MovaCore\logs`, one
-rotated file), handlers for unhandled exceptions, the single-instance mutex, and an up-front check that `uiohook.dll`
-loads. Never log clipboard text or keystrokes. `SmokeTest.cs` counts on `AppLog.ErrorCount`, so report failures
-through `AppLog.Error` rather than swallowing them.
+Settings: `Services/SettingsService.cs` stores `Models/AppSettings` as JSON in `%APPDATA%\MovaCore\settings.json`
+(atomic write) and never shows UI; `Save` throws and the caller reports it. The Windows autostart entry
+(`HKCU\...\Run`) lives behind `IStartupRegistration` (`StartupRegistration.cs`) and is the source of truth for
+`LaunchAtStartup`; `Load` re-points it at the running exe only when the registered exe no longer exists.
+`UI/SettingsForm.cs` is built in code (no designer file), laid out in 96-DPI pixels with `AutoScaleMode.Dpi`, and maps
+WinForms `Keys` to SharpHook `KeyCode` by hand.
 
 The tray icon, exe icon and settings logo are embedded resources (`AppResources.cs`) generated from
 `Resources/mouse_icon.png` by `eng/generate-icons.py`; regenerate them instead of editing the `.ico`/`.png` by hand.
 
-Interfaces and their implementations share a file (e.g. `IHotkeyService.cs` contains `HotkeyService`).
+One top-level type per file; interfaces live next to their implementations in `Services/`.
 
 Tests (`tests/MovaCore.Tests`, xUnit) cannot reference the WinForms app, so the csproj compiles the platform-neutral
-files from `Services/` in as linked sources (and `internal` members are visible to tests). Keep WinForms/registry code
-out of those files, and add a link when a new testable file appears. The app csproj excludes `tests/**` from its
-default globs because the app project sits at the repository root.
+files in as linked sources (and `internal` members are visible to tests). `HotkeyService` and `ClipboardService` are
+Windows-only and are not linked: tests use fakes (`tests/MovaCore.Tests/Fakes.cs`), and the real Win32 behaviour is
+covered by the smoke test in CI. Keep WinForms/registry code out of linked files, and add a link when a new testable
+file appears. The app csproj excludes `tests/**` from its default globs because the app project sits at the root.
 
 ## Native AOT constraints
 

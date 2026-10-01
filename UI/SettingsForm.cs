@@ -18,6 +18,7 @@ namespace MovaCore.UI
         private Button _recordButton;
         private CheckBox _startupCheckBox;
         private CheckBox _notifyCheckBox;
+        private CheckBox _restoreCheckBox;
         private Button _saveButton;
         private Button _cancelButton;
 
@@ -30,7 +31,7 @@ namespace MovaCore.UI
             InitializeComponent();
         }
 
-        [MemberNotNull(nameof(_hotkeyLabel), nameof(_recordButton), nameof(_startupCheckBox), nameof(_notifyCheckBox), nameof(_saveButton), nameof(_cancelButton))]
+        [MemberNotNull(nameof(_hotkeyLabel), nameof(_recordButton), nameof(_startupCheckBox), nameof(_notifyCheckBox), nameof(_restoreCheckBox), nameof(_saveButton), nameof(_cancelButton))]
         private void InitializeComponent()
         {
             // The layout below is in pixels at 96 DPI; AutoScaleMode.Dpi scales it to the monitor's DPI
@@ -39,7 +40,7 @@ namespace MovaCore.UI
             this.AutoScaleMode = AutoScaleMode.Dpi;
 
             this.Text = "MovaCore Settings";
-            this.Size = new Size(350, 400);
+            this.Size = new Size(350, 430);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.StartPosition = FormStartPosition.CenterScreen;
             this.MaximizeBox = false;
@@ -122,11 +123,20 @@ namespace MovaCore.UI
             };
             this.Controls.Add(_notifyCheckBox);
 
+            _restoreCheckBox = new CheckBox
+            {
+                Text = "Restore clipboard after conversion",
+                Location = new Point(30, 310),
+                Size = new Size(250, 25),
+                Checked = _settings.RestoreClipboard
+            };
+            this.Controls.Add(_restoreCheckBox);
+
             // Actions
             _saveButton = new Button
             {
                 Text = "Save",
-                Location = new Point(130, 320),
+                Location = new Point(130, 350),
                 Size = new Size(90, 35),
                 DialogResult = DialogResult.OK
             };
@@ -136,7 +146,7 @@ namespace MovaCore.UI
             _cancelButton = new Button
             {
                 Text = "Cancel",
-                Location = new Point(230, 320),
+                Location = new Point(230, 350),
                 Size = new Size(90, 35),
                 DialogResult = DialogResult.Cancel
             };
@@ -189,7 +199,8 @@ namespace MovaCore.UI
             {
                 TriggerKey = _tempKeyCode,
                 LaunchAtStartup = _startupCheckBox.Checked,
-                ShowNotifications = _notifyCheckBox.Checked
+                ShowNotifications = _notifyCheckBox.Checked,
+                RestoreClipboard = _restoreCheckBox.Checked
             };
             this.Close();
         }

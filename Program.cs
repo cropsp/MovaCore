@@ -5,7 +5,6 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using Microsoft.Extensions.DependencyInjection;
 using MovaCore.Services;
 
 namespace MovaCore
@@ -57,20 +56,18 @@ namespace MovaCore
                 return;
             }
 
-            // Configure Dependency Injection
-            var services = new ServiceCollection();
-            ConfigureServices(services);
+            // Composition root: a handful of long-lived objects wired by hand (no DI container to trim under AOT).
+            // The clipboard service creates its owner window here, on the UI thread whose message loop serves it.
+            var converter = new LayoutConverterService();
+            using var hotkeys = new HotkeyService();
+            using var clipboard = new ClipboardService();
+            var orchestrator = new HotkeyOrchestrator(hotkeys, converter, clipboard);
+            var settings = new SettingsService(new StartupRegistration());
+            using var context = new TrayApplicationContext(hotkeys, orchestrator, settings);
 
-            using var serviceProvider = services.BuildServiceProvider();
-
-            // Start the application context
-            var context = serviceProvider.GetRequiredService<TrayApplicationContext>();
             if (smokeTest)
             {
-                SmokeTest.Schedule(
-                    context,
-                    serviceProvider.GetRequiredService<IClipboardService>(),
-                    serviceProvider.GetRequiredService<ILayoutConverterService>());
+                SmokeTest.Schedule(context, clipboard, converter, hotkeys);
             }
 
             Application.Run(context);
@@ -139,18 +136,6 @@ namespace MovaCore
                 // The mutex belongs to an instance running as administrator, which a regular process cannot open
                 return null;
             }
-        }
-
-        private static void ConfigureServices(IServiceCollection services)
-        {
-            // Services
-            services.AddSingleton<ILayoutConverterService, LayoutConverterService>();
-            services.AddSingleton<IHotkeyService, HotkeyService>();
-            services.AddSingleton<IClipboardService, ClipboardService>();
-            services.AddSingleton<HotkeyOrchestrator>();
-
-            // Application Context
-            services.AddSingleton<TrayApplicationContext>();
         }
     }
 }

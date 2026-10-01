@@ -15,6 +15,9 @@
     <Compile Include="../../Services/HotkeyOrchestrator.cs" Link="Linked/HotkeyOrchestrator.cs" />
     <Compile Include="../../Services/IHotkeyService.cs" Link="Linked/IHotkeyService.cs" />
     <Compile Include="../../Services/IClipboardService.cs" Link="Linked/IClipboardService.cs" />
+    <Compile Include="../../Services/ClipboardSnapshot.cs" Link="Linked/ClipboardSnapshot.cs" />
+    <Compile Include="../../Services/SettingsService.cs" Link="Linked/SettingsService.cs" />
+    <Compile Include="../../Services/IStartupRegistration.cs" Link="Linked/IStartupRegistration.cs" />
     <Compile Include="../../Services/AppLog.cs" Link="Linked/AppLog.cs" />
     <Compile Include="../../Services/FileLog.cs" Link="Linked/FileLog.cs" />
     <Compile Include="../../Models/AppSettings.cs" Link="Linked/AppSettings.cs" />

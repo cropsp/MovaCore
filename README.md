@@ -17,6 +17,7 @@ Born from the need to seamlessly switch text between English and Ukrainian (and 
 - **Blazing Fast:** Built with **.NET 10 & Native AOT**, ensuring instant startup and no .NET installation required.
 - **"Polite" Clipboard Handling:** Uses raw **Win32 P/Invoke** instead of high-level wrappers, overcoming common "Access Denied" or "COM Interop" issues.
 - **Smart Retries:** Automatically handles clipboard locks from other applications (like Telegram or Browsers).
+- **Keeps Your Clipboard:** After converting, MovaCore puts back whatever you had copied before, and its own clipboard writes stay out of Windows clipboard history (Win+V). This can be turned off in Settings.
 - **Architecture:** 
   - Non-blocking keyboard hooks via **SharpHook**.
   - Background task orchestration to ensure your input never lags.

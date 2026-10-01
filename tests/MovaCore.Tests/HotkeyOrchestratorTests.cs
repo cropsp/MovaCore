@@ -17,7 +17,9 @@ namespace MovaCore.Tests
         {
             _orchestrator = new HotkeyOrchestrator(_hotkeys, new LayoutConverterService(), _clipboard)
             {
-                CopyTimeout = TimeSpan.FromMilliseconds(200)
+                CopyTimeout = TimeSpan.FromMilliseconds(200),
+                PasteTimeout = TimeSpan.FromMilliseconds(200),
+                RestoreDelay = TimeSpan.Zero
             };
             _orchestrator.ConversionFailed += (_, message) => _messages.Add(message);
         }
@@ -29,8 +31,81 @@ namespace MovaCore.Tests
 
             await _orchestrator.ExecuteConversionAsync();
 
-            Assert.Equal("привіт", _clipboard.Text);
+            Assert.Equal("привіт", _clipboard.LastSetText);
             Assert.Equal(1, _hotkeys.PasteCalls);
+        }
+
+        [Fact]
+        public async Task ClipboardIsRestored_AfterThePasteIsRead()
+        {
+            _clipboard.SimulateAppCopy("user clipboard");
+            _hotkeys.OnCopy = () => _clipboard.SimulateAppCopy("ghbdsn");
+
+            await _orchestrator.ExecuteConversionAsync();
+
+            Assert.Equal("привіт", _clipboard.LastSetText);
+            Assert.Equal(1, _hotkeys.PasteCalls);
+            Assert.Equal("user clipboard", _clipboard.Text);
+        }
+
+        // Restoring before the app has read the converted text would make it paste the old clipboard content instead
+        [Fact]
+        public async Task ClipboardKeepsConvertedText_WhenThePasteIsNotObserved()
+        {
+            _clipboard.SimulateAppCopy("user clipboard");
+            _clipboard.PasteObserved = false;
+            _hotkeys.OnCopy = () => _clipboard.SimulateAppCopy("ghbdsn");
+
+            await _orchestrator.ExecuteConversionAsync();
+
+            Assert.Equal(1, _hotkeys.PasteCalls);
+            Assert.Equal(0, _clipboard.RestoreCalls);
+            Assert.Equal("привіт", _clipboard.Text);
+        }
+
+        [Fact]
+        public async Task ClipboardIsRestored_WhenThereIsNothingToConvert()
+        {
+            _clipboard.SimulateAppCopy("user clipboard");
+            uint sequenceAfterCopy = 0;
+            _hotkeys.OnCopy = () =>
+            {
+                _clipboard.SimulateAppCopy("12345");
+                sequenceAfterCopy = _clipboard.Sequence;
+            };
+
+            await _orchestrator.ExecuteConversionAsync();
+
+            Assert.Equal(0, _hotkeys.PasteCalls);
+            Assert.Equal("user clipboard", _clipboard.Text);
+            Assert.Equal(sequenceAfterCopy, _clipboard.RestoredExpectedSequence);
+        }
+
+        [Fact]
+        public async Task ClipboardIsRestored_WhenWritingTheConvertedTextFails()
+        {
+            _clipboard.SimulateAppCopy("user clipboard");
+            _clipboard.FailSet = true;
+            _hotkeys.OnCopy = () => _clipboard.SimulateAppCopy("ghbdsn");
+
+            await _orchestrator.ExecuteConversionAsync();
+
+            Assert.Equal(0, _hotkeys.PasteCalls);
+            Assert.Equal("user clipboard", _clipboard.Text);
+        }
+
+        [Fact]
+        public async Task RestoreDisabled_LeavesTheConvertedText()
+        {
+            _orchestrator.RestoreClipboard = false;
+            _clipboard.SimulateAppCopy("user clipboard");
+            _hotkeys.OnCopy = () => _clipboard.SimulateAppCopy("ghbdsn");
+
+            await _orchestrator.ExecuteConversionAsync();
+
+            Assert.Equal(0, _clipboard.CaptureCalls);
+            Assert.Equal(0, _clipboard.RestoreCalls);
+            Assert.Equal("привіт", _clipboard.Text);
         }
 
         // Regression: with nothing selected the copy never reaches the clipboard,
@@ -46,6 +121,7 @@ namespace MovaCore.Tests
             Assert.Equal("old clipboard text", _clipboard.Text);
             Assert.Equal(0, _clipboard.GetCalls);
             Assert.Equal(0, _clipboard.SetCalls);
+            Assert.Equal(0, _clipboard.RestoreCalls);
             Assert.Equal(0, _hotkeys.PasteCalls);
             Assert.Equal(1, _hotkeys.CopyCalls);
         }
