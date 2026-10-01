@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Text;
+using MovaCore.Models;
 using MovaCore.Services;
 using Xunit;
 
@@ -67,6 +68,86 @@ namespace MovaCore.Tests
             string cyrillicLetters = new string(alphabet.Where(c => char.IsLetter(c) && c > 127).ToArray());
 
             AssertRoundTripHolds(alphabet, cyrillicLetters);
+        }
+
+        [Theory]
+        [InlineData("ghbdsn", KeyboardLanguage.Ukrainian)]
+        [InlineData("Ghbdsn? cdsn", KeyboardLanguage.Ukrainian)]
+        [InlineData("руддщ", KeyboardLanguage.English)]
+        [InlineData("Привіт, світ", KeyboardLanguage.English)]
+        [InlineData("№1", KeyboardLanguage.English)]
+        [InlineData("#1", KeyboardLanguage.Ukrainian)]
+        public void TargetOf_IsTheLayoutTheTextIsConvertedInto(string text, KeyboardLanguage expected)
+        {
+            Assert.Equal(expected, Converter.TargetOf(text));
+        }
+
+        // On a tie the text is assumed to be typed in the English layout, the most common case
+        [Theory]
+        [InlineData("")]
+        [InlineData("   ")]
+        [InlineData("12345")]
+        [InlineData(",.?;")]
+        [InlineData("aф")]
+        [InlineData("abфі")]
+        public void TargetOf_NoVotesOrATie_IsUkrainian(string text)
+        {
+            Assert.Equal(KeyboardLanguage.Ukrainian, Converter.TargetOf(text));
+        }
+
+        // Only characters that exist in a single layout vote
+        [Theory]
+        [InlineData("a,.?;фі", KeyboardLanguage.English)]
+        [InlineData("aб", KeyboardLanguage.Ukrainian)]
+        [InlineData("abф", KeyboardLanguage.Ukrainian)]
+        [InlineData("aфі", KeyboardLanguage.English)]
+        public void TargetOf_CountsOnlyCharactersOfASingleLayout(string text, KeyboardLanguage expected)
+        {
+            Assert.Equal(expected, Converter.TargetOf(text));
+        }
+
+        [Fact]
+        public void BuiltInKeys_PairUpWithoutDuplicates()
+        {
+            Assert.Equal(LayoutConverterService.DefaultEnglishKeys.Length, LayoutConverterService.DefaultUkrainianKeys.Length);
+            Assert.Equal(LayoutConverterService.DefaultEnglishKeys.Length, LayoutConverterService.DefaultEnglishKeys.Distinct().Count());
+            Assert.Equal(LayoutConverterService.DefaultUkrainianKeys.Length, LayoutConverterService.DefaultUkrainianKeys.Distinct().Count());
+        }
+
+        [Fact]
+        public void Constructor_CustomKeys_AreUsedInBothDirections()
+        {
+            var converter = new LayoutConverterService("ab", "жф");
+
+            Assert.Equal("жф", converter.Convert("ab"));
+            Assert.Equal("ab", converter.Convert("жф"));
+        }
+
+        [Theory]
+        [InlineData("abc", "жф")]
+        [InlineData("ab", "ж")]
+        [InlineData("", "ж")]
+        [InlineData("a", "")]
+        public void Constructor_KeysOfDifferentLengths_Throws(string englishKeys, string ukrainianKeys)
+        {
+            Assert.Throws<ArgumentException>(() => new LayoutConverterService(englishKeys, ukrainianKeys));
+        }
+
+        [Theory]
+        [InlineData("aa", "жф")]
+        [InlineData("ab", "жж")]
+        public void Constructor_DuplicateCharacter_Throws(string englishKeys, string ukrainianKeys)
+        {
+            Assert.ThrowsAny<Exception>(() => new LayoutConverterService(englishKeys, ukrainianKeys));
+        }
+
+        [Fact]
+        public void Constructor_NoKeys_ConvertsNothing()
+        {
+            var converter = new LayoutConverterService(string.Empty, string.Empty);
+
+            Assert.Equal("ghbdsn", converter.Convert("ghbdsn"));
+            Assert.Equal(KeyboardLanguage.Ukrainian, converter.TargetOf("ghbdsn"));
         }
 
         // Every generated string contains at least one letter from `guaranteedLetters`, so it always has

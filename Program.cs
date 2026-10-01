@@ -5,7 +5,9 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using MovaCore.Models;
 using MovaCore.Services;
+using MovaCore.UI;
 
 namespace MovaCore
 {
@@ -26,13 +28,16 @@ namespace MovaCore
             // Set up WinForms state
             ApplicationConfiguration.Initialize();
 
+            // Until the settings are loaded, messages follow the Windows display language
+            Strings.Language = WindowsLanguage.Resolve(UiLanguage.Auto);
+
             // Only one instance per user session: a second tray icon would be confusing,
             // and both instances would overwrite each other's settings.
             using var singleInstanceMutex = TryAcquireSingleInstance();
             if (singleInstanceMutex == null)
             {
                 MessageBox.Show(
-                    "MovaCore is already running. Look for the mouse icon in the system tray.",
+                    Strings.AlreadyRunning,
                     "MovaCore",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
@@ -48,8 +53,7 @@ namespace MovaCore
                     return;
                 }
                 MessageBox.Show(
-                    "uiohook.dll was not found next to MovaCore.exe, so the hotkey cannot work.\n\n" +
-                    "Extract all files from the release archive into the same folder and start MovaCore again.",
+                    Strings.HookLibraryMissing,
                     "MovaCore",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
@@ -58,10 +62,11 @@ namespace MovaCore
 
             // Composition root: a handful of long-lived objects wired by hand (no DI container to trim under AOT).
             // The clipboard service creates its owner window here, on the UI thread whose message loop serves it.
-            var converter = new LayoutConverterService();
+            var converter = KeyboardLayouts.CreateConverter();
+            var layouts = new KeyboardLayouts();
             using var hotkeys = new HotkeyService();
             using var clipboard = new ClipboardService();
-            var orchestrator = new HotkeyOrchestrator(hotkeys, converter, clipboard);
+            var orchestrator = new HotkeyOrchestrator(hotkeys, converter, clipboard, layouts);
             var settings = new SettingsService(new StartupRegistration());
             using var context = new TrayApplicationContext(hotkeys, orchestrator, settings);
 
@@ -94,7 +99,7 @@ namespace MovaCore
                     return;
                 }
                 MessageBox.Show(
-                    $"Unexpected error: {e.Exception.Message}\n\nDetails were written to {AppLog.FilePath ?? "the log"}.",
+                    Strings.UnexpectedErrorWithLog(e.Exception.Message, AppLog.FilePath),
                     "MovaCore",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);

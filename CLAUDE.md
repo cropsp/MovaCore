@@ -50,18 +50,23 @@ than swallowing them.
 The conversion pipeline runs across these files:
 
 1. **`Services/HotkeyService.cs`** runs a keyboard-only SharpHook `SimpleGlobalHook` via `RunAsync` on a background
-   thread. It suppresses both press and release of the trigger key and raises `HotkeyTriggered` on *release*.
-   Hook callbacks run synchronously on the hook thread: `e.SuppressEvent` must be set there, and handlers must return
-   fast. `Stop` keeps the hook reusable (it waits until the hook thread has really stopped); `HookFailed` reports a
-   hook that cannot start. The same class simulates Ctrl+C / Ctrl+V, first releasing only the modifiers that are
-   physically held.
+   thread. The trigger is a `Models/Hotkey` (key + exact modifiers, matched by `HotkeyMatching`); it suppresses both
+   press and release of the trigger key and raises `HotkeyTriggered` on *release*, unless the foreground process is
+   in the excluded list. Hook callbacks run synchronously on the hook thread: `e.SuppressEvent` must be set there,
+   and handlers must return fast. Our own simulated events never count as the trigger. When the trigger includes Alt
+   or Win, an unassigned key (VK 0xE8) is tapped so their release opens neither the app's menu nor Start; simulated
+   shortcuts likewise press Ctrl *before* releasing held modifiers. `CaptureHotkeyAsync` records a new hotkey through
+   the hook (used by the settings form). `Stop` keeps the hook reusable (it waits until the hook thread has really
+   stopped); `HookFailed` reports a hook that cannot start. The same class simulates copy/paste (Ctrl+C/V or
+   Ctrl+Insert/Shift+Insert) and selection (Shift+Left, Ctrl+Shift+Left).
 2. **`TrayApplicationContext.cs`** owns the tray icon, the settings dialog and the lifetime. It forwards
    `HotkeyTriggered` to the orchestrator via `Task.Run`, so conversion never runs on the UI or hook thread, and it
    marshals worker-thread events (`ConversionFailed`, `HookFailed`) back to the UI thread before touching `NotifyIcon`.
 3. **`Services/HotkeyOrchestrator.cs`** performs the clipboard round-trip: capture a snapshot of the user's clipboard →
    simulate Ctrl+C → wait (up to `CopyTimeout`) for the clipboard sequence number to change → read and convert →
-   put the converted text on the clipboard → simulate Ctrl+V → wait until the target app reads it → restore the
-   snapshot. If the sequence number does not change, nothing was selected and the clipboard is left alone. The
+   put the converted text on the clipboard → simulate Ctrl+V → wait until the target app reads it → re-select the
+   pasted text (single-line, ≤ 300 text elements) → switch the window's layout to the target language → restore the
+   snapshot. With `ConvertLastWord` (off by default) an empty copy is retried after Ctrl+Shift+Left. If the sequence number does not change, nothing was selected and the clipboard is left alone. The
    snapshot is restored only after the paste is observed: restoring earlier would paste the old content instead.
    A second hotkey press while a conversion runs is dropped (`Interlocked` busy flag). `ConversionFailed` reports
    errors (a tray balloon) in addition to the log.
@@ -76,15 +81,24 @@ The conversion pipeline runs across these files:
 5. **`Services/LayoutConverterService.cs`** holds two one-way maps (EN→UA, UA→EN) built from the paired
    `EnKeys`/`UaKeys` strings (same physical key at the same index). The direction is chosen once per string by
    counting characters that exist in only one layout; applying a single map to the whole string keeps conversion
-   reversible (`Convert(Convert(s)) == s`). The paired strings must stay the same length without duplicates; the
-   static constructor throws otherwise.
+   reversible (`Convert(Convert(s)) == s`); `TargetOf` tells which language the result is in. `KeyboardLayouts`
+   (Windows-only) builds the key pairs from the installed English and Ukrainian layouts with `ToUnicodeEx`, and
+   `LayoutTableBuilder` turns them into tables, filling gaps from the built-in US/Ukrainian ones. The paired strings
+   must stay the same length without duplicates; the constructor throws otherwise. It also switches the foreground
+   window's layout (`WM_INPUTLANGCHANGEREQUEST`).
 
 Settings: `Services/SettingsService.cs` stores `Models/AppSettings` as JSON in `%APPDATA%\MovaCore\settings.json`
 (atomic write) and never shows UI; `Save` throws and the caller reports it. The Windows autostart entry
 (`HKCU\...\Run`) lives behind `IStartupRegistration` (`StartupRegistration.cs`) and is the source of truth for
 `LaunchAtStartup`; `Load` re-points it at the running exe only when the registered exe no longer exists.
-`UI/SettingsForm.cs` is built in code (no designer file), laid out in 96-DPI pixels with `AutoScaleMode.Dpi`, and maps
-WinForms `Keys` to SharpHook `KeyCode` by hand.
+`UI/SettingsForm.cs` is built in code (no designer file) from auto-sizing `TableLayoutPanel`s with
+`AutoScaleMode.Dpi`; it records the hotkey through `IHotkeyService.CaptureHotkeyAsync`. The tray offers Settings, Pause
+(stops the hook; not persisted), About and Exit, and only one settings window at a time.
+
+All user-visible text lives in `Strings.cs` (English and Ukrainian, chosen by `AppSettings.Language`, where `Auto`
+follows the Windows display language via `UI/WindowsLanguage.cs`). `.resx` localization would not work here:
+`InvariantGlobalization` makes every culture lookup neutral. Add new texts to `Strings` in both languages
+(`StringsTests` checks that none is empty).
 
 The tray icon, exe icon and settings logo are embedded resources (`AppResources.cs`) generated from
 `Resources/mouse_icon.png` by `eng/generate-icons.py`; regenerate them instead of editing the `.ico`/`.png` by hand.

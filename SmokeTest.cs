@@ -1,10 +1,14 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using MovaCore.Models;
 using MovaCore.Services;
 using MovaCore.UI;
+using SharpHook;
+using SharpHook.Data;
 
 namespace MovaCore
 {
@@ -39,10 +43,11 @@ namespace MovaCore
                     switch (step++)
                     {
                         case 0:
-                            form = new SettingsForm(new AppSettings());
+                            form = new SettingsForm(new AppSettings(), _ => Task.FromResult<Hotkey?>(null));
                             form.Show();
                             break;
                         case 1:
+                            CheckSettingsFormSize(form!);
                             await CheckConverterAndClipboardAsync(clipboard, converter);
                             break;
                         case 2:
@@ -52,6 +57,12 @@ namespace MovaCore
                             // Stop must keep the hook reusable; a failed restart is logged through HookFailed
                             hotkeys.Stop();
                             hotkeys.Start();
+                            break;
+                        case 4:
+                            CheckKeyboardLayouts();
+                            break;
+                        case 5:
+                            await CheckHotkeyCaptureAsync(hotkeys);
                             break;
                         default:
                             form?.Close();
@@ -71,6 +82,84 @@ namespace MovaCore
                 timer.Start();
             };
             timer.Start();
+        }
+
+        // The settings form sizes itself; at 150 % it must still fit a 1080p screen (720 logical pixels high)
+        private static void CheckSettingsFormSize(Form form)
+        {
+            int logicalHeight = form.Height * 96 / form.DeviceDpi;
+            int logicalWidth = form.Width * 96 / form.DeviceDpi;
+            AppLog.Info($"Smoke test: settings form is {logicalWidth}x{logicalHeight} at 96 DPI");
+            if (logicalHeight > 720)
+                AppLog.Error($"Smoke test: the settings form is {logicalHeight} px high and would not fit a 1080p screen at 150 %");
+        }
+
+        // The converter reads the user's installed layouts; check that reading against the real layout files.
+        // "Ukrainian" must reproduce the built-in table, "Ukrainian (Enhanced)" must add ґ.
+        private static void CheckKeyboardLayouts()
+        {
+            var installedBefore = new HashSet<IntPtr>(KeyboardLayouts.GetInstalled());
+            IntPtr us = KeyboardLayouts.Load("00000409");
+            IntPtr ukrainian = KeyboardLayouts.Load("00000422");
+            IntPtr enhanced = KeyboardLayouts.Load("00020422");
+            try
+            {
+                if (us == IntPtr.Zero || ukrainian == IntPtr.Zero || enhanced == IntPtr.Zero)
+                {
+                    AppLog.Error("Smoke test: could not load the US and Ukrainian keyboard layouts");
+                    return;
+                }
+
+                var standardPairs = new HashSet<(char, char)>(KeyboardLayouts.ReadKeyPairs(us, ukrainian));
+                var mismatches = new List<string>();
+                for (int i = 0; i < LayoutConverterService.DefaultEnglishKeys.Length; i++)
+                {
+                    char en = LayoutConverterService.DefaultEnglishKeys[i];
+                    char ua = LayoutConverterService.DefaultUkrainianKeys[i];
+                    if (!standardPairs.Contains((en, ua))) mismatches.Add($"{en}->{ua}");
+                }
+                if (mismatches.Count > 0)
+                    AppLog.Error("Smoke test: built-in pairs not typed by the real US/Ukrainian layouts: " + string.Join(" ", mismatches));
+
+                var (englishKeys, ukrainianKeys) = LayoutTableBuilder.Build(standardPairs);
+                if (new LayoutConverterService(englishKeys, ukrainianKeys).Convert("ghbdsn") != "привіт")
+                    AppLog.Error("Smoke test: the tables read from the layouts convert incorrectly");
+
+                List<(char English, char Ukrainian)> enhancedPairs = KeyboardLayouts.ReadKeyPairs(us, enhanced);
+                var ghe = enhancedPairs.FindAll(p => p.Ukrainian is 'ґ' or 'Ґ');
+                if (ghe.Count == 0)
+                    AppLog.Error("Smoke test: \"Ukrainian (Enhanced)\" did not yield ґ");
+                AppLog.Info($"Smoke test: layouts read ({standardPairs.Count} standard pairs; ґ/Ґ on " +
+                    string.Join(", ", ghe.ConvertAll(p => $"'{p.English}'")) + ")");
+            }
+            finally
+            {
+                foreach (IntPtr layout in new[] { us, ukrainian, enhanced })
+                {
+                    if (layout != IntPtr.Zero && !installedBefore.Contains(layout)) KeyboardLayouts.Unload(layout);
+                }
+            }
+
+            bool switched = new KeyboardLayouts().SwitchForegroundWindowTo(KeyboardLanguage.English);
+            AppLog.Info($"Smoke test: layout switch request {(switched ? "sent" : "not sent")}");
+        }
+
+        // Recording a hotkey goes through the global hook. A simulated F13 (bound to nothing) must be captured and
+        // swallowed. Simulating it is safe: no application reacts to F13.
+        private static async Task CheckHotkeyCaptureAsync(IHotkeyService hotkeys)
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            Task<Hotkey?> capture = hotkeys.CaptureHotkeyAsync(timeout.Token);
+
+            var simulator = new EventSimulator();
+            simulator.SimulateKeyPress(KeyCode.VcF13);
+            simulator.SimulateKeyRelease(KeyCode.VcF13);
+
+            Hotkey? captured = await capture;
+            if (captured != new Hotkey(KeyCode.VcF13, HotkeyModifiers.None))
+                AppLog.Error($"Smoke test: recording a hotkey returned {captured?.ToString() ?? "nothing"} instead of F13");
+            else
+                AppLog.Info("Smoke test: hotkey recording checked");
         }
 
         private static async Task CheckConverterAndClipboardAsync(IClipboardService clipboard, ILayoutConverterService converter)

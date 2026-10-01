@@ -1,28 +1,38 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using MovaCore.Models;
 
 namespace MovaCore.Services
 {
     public class LayoutConverterService : ILayoutConverterService
     {
-        // Characters produced by the same physical key: EnKeys[i] (English layout) <-> UaKeys[i] (Ukrainian layout).
-        // Both strings must stay the same length and have no duplicates, so each map is the exact inverse of the other.
-        private const string EnKeys = "qwertyuiop[]asdfghjkl;'zxcvbnm,./QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?@#$^&|`~";
-        private const string UaKeys = "йцукенгшщзхїфівапролджєячсмитьбю.ЙЦУКЕНГШЩЗХЇФІВАПРОЛДЖЄЯЧСМИТЬБЮ,\"№;:?/'₴";
+        // Characters produced by the same physical key in the standard Windows "US" and "Ukrainian" layouts:
+        // DefaultEnglishKeys[i] <-> DefaultUkrainianKeys[i]. Used when the installed layouts cannot be read.
+        public const string DefaultEnglishKeys = "qwertyuiop[]asdfghjkl;'zxcvbnm,./QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?@#$^&|`~";
+        public const string DefaultUkrainianKeys = "йцукенгшщзхїфівапролджєячсмитьбю.ЙЦУКЕНГШЩЗХЇФІВАПРОЛДЖЄЯЧСМИТЬБЮ,\"№;:?/'₴";
 
-        private static readonly Dictionary<char, char> EnToUa = new();
-        private static readonly Dictionary<char, char> UaToEn = new();
+        private readonly Dictionary<char, char> _enToUa = new();
+        private readonly Dictionary<char, char> _uaToEn = new();
 
-        static LayoutConverterService()
+        public LayoutConverterService()
+            : this(DefaultEnglishKeys, DefaultUkrainianKeys)
         {
-            if (EnKeys.Length != UaKeys.Length)
-                throw new InvalidOperationException("EnKeys and UaKeys must pair up character by character.");
+        }
 
-            for (int i = 0; i < EnKeys.Length; i++)
+        /// <summary>
+        /// Both strings pair up character by character and must not contain duplicates, so each map is the exact
+        /// inverse of the other.
+        /// </summary>
+        public LayoutConverterService(string englishKeys, string ukrainianKeys)
+        {
+            if (englishKeys.Length != ukrainianKeys.Length)
+                throw new ArgumentException("The English and Ukrainian keys must pair up character by character.");
+
+            for (int i = 0; i < englishKeys.Length; i++)
             {
-                EnToUa.Add(EnKeys[i], UaKeys[i]);
-                UaToEn.Add(UaKeys[i], EnKeys[i]);
+                _enToUa.Add(englishKeys[i], ukrainianKeys[i]);
+                _uaToEn.Add(ukrainianKeys[i], englishKeys[i]);
             }
         }
 
@@ -33,7 +43,7 @@ namespace MovaCore.Services
 
             // One map for the whole string: characters such as ',' '.' '?' ';' exist in both layouts,
             // so choosing the direction per character made the conversion irreversible
-            var map = DetectSourceIsUkrainian(text) ? UaToEn : EnToUa;
+            var map = TargetOf(text) == KeyboardLanguage.English ? _uaToEn : _enToUa;
 
             var sb = new StringBuilder(text.Length);
             foreach (var c in text)
@@ -47,17 +57,17 @@ namespace MovaCore.Services
 
         // Only characters that exist in a single layout vote (letters, brackets, №, ₴, etc.).
         // On a tie the text is assumed to be typed in the English layout instead of the Ukrainian one, the most common case.
-        private static bool DetectSourceIsUkrainian(string text)
+        public KeyboardLanguage TargetOf(string text)
         {
             int en = 0, ua = 0;
             foreach (var c in text)
             {
-                bool inEn = EnToUa.ContainsKey(c);
-                bool inUa = UaToEn.ContainsKey(c);
+                bool inEn = _enToUa.ContainsKey(c);
+                bool inUa = _uaToEn.ContainsKey(c);
                 if (inEn && !inUa) en++;
                 else if (inUa && !inEn) ua++;
             }
-            return ua > en;
+            return ua > en ? KeyboardLanguage.English : KeyboardLanguage.Ukrainian;
         }
     }
 }

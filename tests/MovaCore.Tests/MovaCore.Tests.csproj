@@ -21,7 +21,17 @@
     <Compile Include="../../Services/AppLog.cs" Link="Linked/AppLog.cs" />
     <Compile Include="../../Services/FileLog.cs" Link="Linked/FileLog.cs" />
     <Compile Include="../../Models/AppSettings.cs" Link="Linked/AppSettings.cs" />
+    <Compile Include="../../Models/Hotkey.cs" Link="Linked/Hotkey.cs" />
+    <Compile Include="../../Models/HotkeyModifiers.cs" Link="Linked/HotkeyModifiers.cs" />
+    <Compile Include="../../Models/CopyPasteKeys.cs" Link="Linked/CopyPasteKeys.cs" />
+    <Compile Include="../../Models/UiLanguage.cs" Link="Linked/UiLanguage.cs" />
+    <Compile Include="../../Models/KeyboardLanguage.cs" Link="Linked/KeyboardLanguage.cs" />
+    <Compile Include="../../Services/HotkeyMatching.cs" Link="Linked/HotkeyMatching.cs" />
+    <Compile Include="../../Services/ProcessNames.cs" Link="Linked/ProcessNames.cs" />
+    <Compile Include="../../Services/LayoutTableBuilder.cs" Link="Linked/LayoutTableBuilder.cs" />
+    <Compile Include="../../Services/IKeyboardLayoutSwitcher.cs" Link="Linked/IKeyboardLayoutSwitcher.cs" />
     <Compile Include="../../Models/SettingsJsonContext.cs" Link="Linked/SettingsJsonContext.cs" />
+    <Compile Include="../../Strings.cs" Link="Linked/Strings.cs" />
   </ItemGroup>
 
   <ItemGroup>

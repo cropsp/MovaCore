@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
+using MovaCore.Models;
 using MovaCore.Services;
-using SharpHook.Data;
 
 namespace MovaCore.Tests
 {
@@ -83,9 +85,16 @@ namespace MovaCore.Tests
     public class FakeHotkeyService : IHotkeyService
     {
         public Action? OnCopy { get; set; }
+        public Action? OnSelectWordLeft { get; set; }
 
         public int CopyCalls { get; set; }
         public int PasteCalls { get; set; }
+        public int SelectWordLeftCalls { get; private set; }
+        public List<int> SelectLeftCalls { get; } = new();
+
+        public Hotkey? Trigger { get; private set; }
+        public List<string> ExcludedProcesses { get; } = new();
+        public CopyPasteKeys CopyPasteKeys { get; set; }
 
         // Never raised by the fake, so the accessors are intentionally empty.
         public event EventHandler? HotkeyTriggered
@@ -102,7 +111,15 @@ namespace MovaCore.Tests
 
         public void Start() { }
         public void Stop() { }
-        public void SetTriggerKey(KeyCode key) { }
+        public void SetTrigger(Hotkey trigger) => Trigger = trigger;
+
+        public void SetExcludedProcesses(IEnumerable<string> processNames)
+        {
+            ExcludedProcesses.Clear();
+            ExcludedProcesses.AddRange(processNames);
+        }
+
+        public Task<Hotkey?> CaptureHotkeyAsync(CancellationToken cancellationToken) => Task.FromResult<Hotkey?>(null);
 
         public void SimulateCopy()
         {
@@ -115,6 +132,25 @@ namespace MovaCore.Tests
             PasteCalls++;
         }
 
+        public void SimulateSelectLeft(int caretSteps) => SelectLeftCalls.Add(caretSteps);
+
+        public void SimulateSelectWordLeft()
+        {
+            SelectWordLeftCalls++;
+            OnSelectWordLeft?.Invoke();
+        }
+
         public void Dispose() { }
+    }
+
+    public class FakeLayoutSwitcher : IKeyboardLayoutSwitcher
+    {
+        public List<KeyboardLanguage> Switches { get; } = new();
+
+        public bool SwitchForegroundWindowTo(KeyboardLanguage language)
+        {
+            Switches.Add(language);
+            return true;
+        }
     }
 }
