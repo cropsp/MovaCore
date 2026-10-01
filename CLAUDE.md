@@ -96,9 +96,10 @@ Settings: `Services/SettingsService.cs` stores `Models/AppSettings` as JSON in `
 (stops the hook; not persisted), About and Exit, and only one settings window at a time.
 
 All user-visible text lives in `Strings.cs` (English and Ukrainian, chosen by `AppSettings.Language`, where `Auto`
-follows the Windows display language via `UI/WindowsLanguage.cs`). `.resx` localization would not work here:
-`InvariantGlobalization` makes every culture lookup neutral. Add new texts to `Strings` in both languages
-(`StringsTests` checks that none is empty).
+follows the Windows display language via `UI/WindowsLanguage.cs`); an in-code table keeps it simple under AOT.
+Add new texts to `Strings` in both languages (`StringsTests` checks that none is empty). Do not turn on
+`InvariantGlobalization`: WinForms builds a `CultureInfo` for the keyboard layout whenever the user switches layouts
+in one of our windows, and that throws in invariant mode.
 
 The tray icon, exe icon and settings logo are embedded resources (`AppResources.cs`) generated from
 `Resources/mouse_icon.png` by `eng/generate-icons.py`; regenerate them instead of editing the `.ico`/`.png` by hand.

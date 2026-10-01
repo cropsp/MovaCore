@@ -116,10 +116,18 @@ namespace MovaCore
                 {
                     char en = LayoutConverterService.DefaultEnglishKeys[i];
                     char ua = LayoutConverterService.DefaultUkrainianKeys[i];
-                    if (!standardPairs.Contains((en, ua))) mismatches.Add($"{en}->{ua}");
+                    if (standardPairs.Contains((en, ua))) continue;
+
+                    // Show what the real layout types on that key, as code points (some are look-alike characters)
+                    var actual = new List<string>();
+                    foreach (var (pairEn, pairUa) in standardPairs)
+                    {
+                        if (pairEn == en) actual.Add($"U+{(int)pairUa:X4}");
+                    }
+                    mismatches.Add($"{en}->{ua} (layout types {(actual.Count > 0 ? string.Join("/", actual) : "nothing")})");
                 }
                 if (mismatches.Count > 0)
-                    AppLog.Error("Smoke test: built-in pairs not typed by the real US/Ukrainian layouts: " + string.Join(" ", mismatches));
+                    AppLog.Error("Smoke test: built-in pairs not typed by the real US/Ukrainian layouts: " + string.Join("; ", mismatches));
 
                 var (englishKeys, ukrainianKeys) = LayoutTableBuilder.Build(standardPairs);
                 if (new LayoutConverterService(englishKeys, ukrainianKeys).Convert("ghbdsn") != "привіт")

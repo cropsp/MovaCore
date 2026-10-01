@@ -17,7 +17,8 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     
     <OptimizationPreference>Size</OptimizationPreference>
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Not InvariantGlobalization: WinForms creates a CultureInfo for the keyboard layout whenever the user switches
+         layouts in one of our windows (WM_INPUTLANGCHANGE*), and invariant mode makes that throw. -->
     
     <DebuggerSupport>false</DebuggerSupport>
     <EventSourceSupport>false</EventSourceSupport>
