@@ -36,8 +36,10 @@ the shim in `eng/LinuxCompileCheck.targets` (command in the file; for `dotnet fo
 as environment variables). Either way the output is not runnable.
 
 CI (`.github/workflows/ci.yml`, Windows runners) is the only place the real app is built, AOT-published (x64 and
-arm64) and smoke-tested; its job summary lists the publish output sizes and the AOT/trim warnings (all currently from WinForms itself). Pushing a `v*` tag
-creates a draft release with zip archives and SHA256 sums.
+arm64) and smoke-tested; its job summary lists the publish output sizes and the AOT/trim warnings (all currently from
+WinForms itself). Pushing a `v*` tag creates a draft release with zip archives and SHA256 sums; the tag must match
+`<Version>` in `MovaCore.csproj`, and the notes come from that version's `CHANGELOG.md` section
+(`docs/RELEASING.md`).
 
 ## Architecture
 

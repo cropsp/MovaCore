@@ -5,6 +5,8 @@ All notable changes to MovaCore are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-01
+
 ### Fixed
 - The v1.0.0 release shipped only `MovaCore.exe`, but the keyboard hook needs `uiohook.dll` next to it, so the hotkey
   silently did nothing. Releases are now zip archives with both files, and a missing DLL is reported at startup.
@@ -28,7 +30,8 @@ All notable changes to MovaCore are documented here. The format follows
   The built-in tables now match "Ukrainian (Enhanced)" exactly (ґ/Ґ on the backslash key); v1.0.0 mixed it with
   the older "Ukrainian" layout.
 - Ukrainian user interface, "About" with a link to the releases page, single-instance protection, a log file in
-  `%LOCALAPPDATA%\MovaCore\logs`, ARM64 builds.
+  `%LOCALAPPDATA%\MovaCore\logs`.
+- ARM64 builds (built and packaged by CI, not yet tested on ARM hardware).
 
 ### Changed
 - .NET 10 (LTS) instead of .NET 8, SharpHook 7.1; the executable is 18.4 MB instead of 54 MB.
@@ -40,5 +43,6 @@ All notable changes to MovaCore are documented here. The format follows
 
 - First release.
 
-[Unreleased]: https://github.com/cropsp/MovaCore/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/cropsp/MovaCore/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/cropsp/MovaCore/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/cropsp/MovaCore/releases/tag/v1.0.0

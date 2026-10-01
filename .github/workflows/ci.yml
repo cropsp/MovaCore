@@ -118,6 +118,33 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
+
+      # The tag must match <Version> in MovaCore.csproj, and CHANGELOG.md must have a section for it
+      - name: Release notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          project_version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' MovaCore.csproj)
+          if [ "$version" != "$project_version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match <Version>$project_version</Version> in MovaCore.csproj"
+            exit 1
+          fi
+          awk -v heading="## [$version]" '
+            /^## \[/ { if (found) exit; if (index($0, heading) == 1) { found = 1; next } }
+            /^\[[^]]+\]: / { if (found) exit }
+            found' CHANGELOG.md > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "::error::CHANGELOG.md has no section for $version"
+            exit 1
+          fi
+          cat >> release-notes.md <<EOF
+
+          ### Installation
+          Download \`MovaCore-$GITHUB_REF_NAME-win-x64.zip\` (or \`win-arm64\` for ARM devices), extract it and run
+          \`MovaCore.exe\`. Keep \`uiohook.dll\` next to it: it is the native keyboard hook. Checksums are in
+          \`SHA256SUMS.txt\`.
+          EOF
+          cat release-notes.md
+
       - uses: actions/download-artifact@v7
         with:
           path: artifacts
@@ -137,4 +164,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" MovaCore-*.zip SHA256SUMS.txt \
-            --draft --title "MovaCore $GITHUB_REF_NAME" --generate-notes
+            --draft --title "MovaCore $GITHUB_REF_NAME" --notes-file release-notes.md
