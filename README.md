@@ -21,14 +21,21 @@ Born from the need to seamlessly switch text between English and Ukrainian (and 
 - **Architecture:** 
   - Non-blocking keyboard hooks via **SharpHook**.
   - Background task orchestration to ensure your input never lags.
-- **Minimalist UI:** Sits quietly in your system tray with a cute field mouse mascot.
+- **Press Again to Undo:** The converted text stays selected, so a second press converts it back, and the keyboard layout switches to the language you meant to type in.
+- **Your Layouts:** Conversion follows the layouts installed in Windows, including "Ukrainian (Enhanced)" with ґ.
+- **Stays Out of the Way:** Pause it from the tray, or list applications (e.g. `devenv`, `Code`) in which the hotkey is left to the application.
+- **Minimalist UI:** Sits quietly in your system tray with a cute field mouse mascot. English and Ukrainian.
 
 ---
 
 ## 🚀 Getting Started
 
 ### Hotkeys
-- **F10 (default, fires on key release):** Highlight text and tap F10 to convert it to the other layout (e.g., `ghbdsn` -> `привіт`, `Руддщ` -> `Hello`). The hotkey can be changed in **Settings** (right-click the tray icon).
+- **F10 (default, fires on key release):** Highlight text and tap F10 to convert it to the other layout (e.g., `ghbdsn` -> `привіт`, `Руддщ` -> `Hello`). Tap it again to convert back.
+- Change the hotkey in **Settings** (right-click or double-click the tray icon): press the new key, optionally with Ctrl, Shift, Alt or Win.
+- In terminals, choose **Ctrl+Insert / Shift+Insert** in Settings: there Ctrl+C without a selection would interrupt the running program.
+
+Settings are stored in `%APPDATA%\MovaCore\settings.json`, and a diagnostic log in `%LOCALAPPDATA%\MovaCore\logs` (it never contains your text or keystrokes). MovaCore makes no network connections.
 
 ### Installation
 1. Download the latest `MovaCore-<version>-win-x64.zip` (or `win-arm64` for ARM devices) from the [Releases](https://github.com/cropsp/MovaCore/releases) page.
