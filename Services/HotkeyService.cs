@@ -51,6 +51,7 @@ namespace MovaCore.Services
         public event EventHandler? HotkeyTriggered;
         public event EventHandler? SpeechHotkeyPressed;
         public event EventHandler? SpeechHotkeyReleased;
+        public event EventHandler? UserKeyPressed;
         public event EventHandler<Exception>? HookFailed;
 
         public HotkeyService()
@@ -179,6 +180,11 @@ namespace MovaCore.Services
 
             HotkeyAction action = _tracker.OnKeyPressed(
                 key, e.RawEvent.Mask, e.IsEventSimulated, _trigger.Value, _speech.Value, IsForegroundProcessExcluded);
+            if (!e.IsEventSimulated && action is HotkeyAction.PassThrough or HotkeyAction.TriggerPressed
+                && !HotkeyMatching.IsModifierKey(key))
+            {
+                UserKeyPressed?.Invoke(this, EventArgs.Empty);
+            }
             if (action == HotkeyAction.PassThrough) return;
 
             e.SuppressEvent = true;

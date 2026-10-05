@@ -199,7 +199,21 @@ namespace MovaCore
         public static string SpeechModelBrowse => T("Browse…", "Огляд…");
         public static string SpeechModelDownload => T("Download", "Завантажити");
         public static string SpeechModelWhereToGet => T("Where to get models", "Де взяти моделі");
-        public static string SpeechModelReady => T("✓ Downloaded", "✓ Завантажено");
+        public static string SpeechModelDelete => T("Delete", "Видалити");
+
+        public static string SpeechModelDownloadedSize(string size) =>
+            string.Format(T("✓ Downloaded ({0})", "✓ Завантажено ({0})"), size);
+
+        public static string SpeechModelDeleteConfirm(string name, string size) => string.Format(T(
+            "Delete the speech model {0} ({1}) from this computer? You can download it again later.",
+            "Видалити модель розпізнавання {0} ({1}) з комп'ютера? Її можна буде завантажити знову."), name, size);
+
+        public static string SpeechModelDeleteTurnsOffVoice => T(
+            "Voice input uses this model, so it will be turned off.",
+            "Голосове введення використовує цю модель, тож його буде вимкнено.");
+
+        public static string SpeechModelDeleteFailed(string reason) =>
+            string.Format(T("Could not delete the model: {0}", "Не вдалося видалити модель: {0}"), reason);
 
         public static string SpeechModelNotDownloaded(string size) => string.Format(T(
             "Not downloaded yet ({0}). Saving with voice input on starts the download.",
@@ -216,15 +230,22 @@ namespace MovaCore
         /// <summary>A catalog model as listed in the settings, e.g. "Large v3 Turbo q8_0: recommended (874 MB)".</summary>
         public static string SpeechModelName(SpeechModelInfo model)
         {
-            (string variant, string description) = model.Id switch
+            string description = model.Id switch
             {
-                SpeechModelCatalog.DefaultId => ("q8_0", T("recommended", "рекомендована")),
-                "large-v3-turbo" => ("", T("full precision, best with a graphics card", "повна точність, найкраще з відеокартою")),
-                _ => ("q5_0", T("smaller, for slower computers", "менша, для слабших комп'ютерів")),
+                SpeechModelCatalog.DefaultId => T("recommended", "рекомендована"),
+                "large-v3-turbo" => T("full precision, best with a graphics card", "повна точність, найкраще з відеокартою"),
+                _ => T("smaller, for slower computers", "менша, для слабших комп'ютерів"),
             };
-            string name = variant.Length == 0 ? "Large v3 Turbo" : "Large v3 Turbo " + variant;
-            return $"{name}: {description} ({FormatSize(model.ApproximateBytes)})";
+            return $"{SpeechModelShortName(model)}: {description} ({FormatSize(model.ApproximateBytes)})";
         }
+
+        /// <summary>A catalog model's name alone, e.g. "Large v3 Turbo q8_0".</summary>
+        public static string SpeechModelShortName(SpeechModelInfo model) => model.Id switch
+        {
+            SpeechModelCatalog.DefaultId => "Large v3 Turbo q8_0",
+            "large-v3-turbo" => "Large v3 Turbo",
+            _ => "Large v3 Turbo q5_0",
+        };
 
         public static string SpeechCustomNone => T("Choose a whisper.cpp model file (.bin)", "Виберіть файл моделі whisper.cpp (.bin)");
         public static string SpeechCustomGgml => T("✓ whisper.cpp model", "✓ Модель whisper.cpp");

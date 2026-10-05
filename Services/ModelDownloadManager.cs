@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,6 +18,7 @@ namespace MovaCore.Services
         private CancellationTokenSource? _cts; // the current download's; a finished one's stays until the next Start
         private Task _current = Task.CompletedTask;
         private ModelDownloadState _state = ModelDownloadState.Idle;
+        private readonly HashSet<string> _deleted = new(); // guarded by _lock
 
         public ModelDownloadManager(ModelDownloader downloader, string modelsDirectory)
         {
@@ -37,9 +39,51 @@ namespace MovaCore.Services
         /// <summary>Raised on a worker thread whenever <see cref="State"/> changes, including progress.</summary>
         public event EventHandler<ModelDownloadState>? StateChanged;
 
+        /// <summary>Raised on the calling thread after <see cref="Delete"/> removed a model.</summary>
+        public event EventHandler<SpeechModelInfo>? ModelDeleted;
+
         public string PathOf(SpeechModelInfo model) => Path.Combine(ModelsDirectory, model.FileName);
 
         public bool IsDownloaded(SpeechModelInfo model) => File.Exists(PathOf(model));
+
+        /// <summary>The size of the downloaded model, or null if it is not on disk.</summary>
+        public long? SizeOnDisk(SpeechModelInfo model)
+        {
+            var file = new FileInfo(PathOf(model));
+            return file.Exists ? file.Length : null;
+        }
+
+        /// <summary>
+        /// Whether the user deleted this model since the app started: it is then not downloaded again on its own, only
+        /// when asked to (<see cref="Start"/>).
+        /// </summary>
+        public bool WasDeleted(SpeechModelInfo model)
+        {
+            lock (_lock) return _deleted.Contains(model.Id);
+        }
+
+        /// <summary>
+        /// Deletes the model and any unfinished download of it. Not while it downloads (cancel that first). File system
+        /// errors (the file is in use, access denied) are thrown for the caller to report.
+        /// </summary>
+        public void Delete(SpeechModelInfo model)
+        {
+            lock (_lock)
+            {
+                if (_state.Status == ModelDownloadStatus.Downloading && _state.ModelId == model.Id)
+                    throw new InvalidOperationException($"{model.FileName} is downloading");
+
+                if (Directory.Exists(ModelsDirectory))
+                {
+                    string path = PathOf(model);
+                    File.Delete(path);
+                    File.Delete(ModelDownloader.PartialPathOf(path));
+                }
+                _deleted.Add(model.Id);
+            }
+            AppLog.Info($"Speech model {model.FileName} deleted");
+            ModelDeleted?.Invoke(this, model);
+        }
 
         /// <summary>
         /// Starts downloading the model unless it is already on disk or already downloading. A download of another
@@ -50,6 +94,7 @@ namespace MovaCore.Services
             ModelDownloadState state;
             lock (_lock)
             {
+                _deleted.Remove(model.Id);
                 if (_state.Status == ModelDownloadStatus.Downloading && _state.ModelId == model.Id) return;
                 if (IsDownloaded(model)) return;
 

@@ -53,6 +53,10 @@
     <Compile Include="../../Services/ISpeechDetector.cs" Link="Linked/ISpeechDetector.cs" />
     <Compile Include="../../Models/SpeechSegment.cs" Link="Linked/SpeechSegment.cs" />
     <Compile Include="../../Services/SpectrumAnalyzer.cs" Link="Linked/SpectrumAnalyzer.cs" />
+    <Compile Include="../../Models/DictationFocus.cs" Link="Linked/DictationFocus.cs" />
+    <Compile Include="../../Services/IDictationTarget.cs" Link="Linked/IDictationTarget.cs" />
+    <Compile Include="../../Services/DictationContext.cs" Link="Linked/DictationContext.cs" />
+    <Compile Include="../../Services/TranscriptJoiner.cs" Link="Linked/TranscriptJoiner.cs" />
     <Compile Include="../../Services/AudioSamples.cs" Link="Linked/AudioSamples.cs" />
     <Compile Include="../../Services/TranscriptText.cs" Link="Linked/TranscriptText.cs" />
     <Compile Include="../../Services/SpeechModelFile.cs" Link="Linked/SpeechModelFile.cs" />

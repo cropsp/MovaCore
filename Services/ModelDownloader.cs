@@ -43,6 +43,9 @@ namespace MovaCore.Services
         /// <summary>How long a response or a read may deliver nothing before the download counts as stalled.</summary>
         internal TimeSpan StallTimeout { get; init; } = TimeSpan.FromSeconds(30);
 
+        /// <summary>Where an unfinished download of <paramref name="destinationPath"/> is kept.</summary>
+        public static string PartialPathOf(string destinationPath) => destinationPath + ".partial";
+
         /// <summary>Free bytes on the drive holding a path (null if unknown); replaceable for tests.</summary>
         internal Func<string, long?> GetFreeSpace { get; init; } = DefaultFreeSpace;
 
@@ -52,7 +55,7 @@ namespace MovaCore.Services
             IProgress<ModelDownloadProgress>? progress,
             CancellationToken cancellationToken)
         {
-            string partialPath = destinationPath + ".partial";
+            string partialPath = PartialPathOf(destinationPath);
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(destinationPath))!);

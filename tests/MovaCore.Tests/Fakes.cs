@@ -131,6 +131,12 @@ namespace MovaCore.Tests
             remove { }
         }
 
+        public event EventHandler? UserKeyPressed
+        {
+            add { }
+            remove { }
+        }
+
         public void Start() { }
         public void Stop() { }
         public void SetTrigger(Hotkey trigger) => Trigger = trigger;

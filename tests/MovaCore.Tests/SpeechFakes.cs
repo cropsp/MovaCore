@@ -77,6 +77,9 @@ namespace MovaCore.Tests
         public List<SpeechOptions> Preloads { get; } = new();
         public List<SpeechOptions> Transcriptions { get; } = new();
         public int SampleCount { get; private set; }
+        public int Unloads => Volatile.Read(ref _unloads);
+
+        private int _unloads;
 
         public Task PreloadAsync(SpeechOptions options, CancellationToken cancellationToken)
         {
@@ -91,6 +94,12 @@ namespace MovaCore.Tests
             if (Gate != null) await Gate.Task.WaitAsync(cancellationToken);
             if (Error != null) throw Error;
             return Segments;
+        }
+
+        public Task UnloadAsync()
+        {
+            Interlocked.Increment(ref _unloads);
+            return Task.CompletedTask;
         }
 
         public void Dispose() { }

@@ -31,14 +31,15 @@ namespace MovaCore.Tests
 
         private SpeechOrchestrator Create(
             TimeSpan? minRecording = null, TimeSpan? maxRecording = null, string? modelPath = "", ISpeechDetector? detector = null,
-            TimeSpan? keepMicrophoneOpen = null, TimeSpan? trailingAudio = null, TimeSpan? noticeableHold = null)
+            TimeSpan? keepMicrophoneOpen = null, TimeSpan? trailingAudio = null, TimeSpan? noticeableHold = null,
+            DictationContext? context = null)
         {
             var paster = new TextPaster(_hotkeys, _clipboard, new ClipboardGate())
             {
                 PasteTimeout = TimeSpan.FromMilliseconds(100),
                 RestoreDelay = TimeSpan.Zero,
             };
-            var orchestrator = new SpeechOrchestrator(_recorder, _recognizer, paster, detector)
+            var orchestrator = new SpeechOrchestrator(_recorder, _recognizer, paster, detector, context)
             {
                 MinRecording = minRecording ?? TimeSpan.Zero,
                 MaxRecording = maxRecording ?? TimeSpan.FromMinutes(1),
@@ -53,12 +54,13 @@ namespace MovaCore.Tests
 
         private void Recreate(
             TimeSpan? minRecording = null, TimeSpan? maxRecording = null, string? modelPath = "", ISpeechDetector? detector = null,
-            TimeSpan? keepMicrophoneOpen = null, TimeSpan? trailingAudio = null, TimeSpan? noticeableHold = null)
+            TimeSpan? keepMicrophoneOpen = null, TimeSpan? trailingAudio = null, TimeSpan? noticeableHold = null,
+            DictationContext? context = null)
         {
             _orchestrator.Dispose();
             _events.Dispose();
             _events = new BlockingCollection<SpeechStateChangedEventArgs>();
-            _orchestrator = Create(minRecording, maxRecording, modelPath, detector, keepMicrophoneOpen, trailingAudio, noticeableHold);
+            _orchestrator = Create(minRecording, maxRecording, modelPath, detector, keepMicrophoneOpen, trailingAudio, noticeableHold, context);
         }
 
         private static SpeechSettings Settings(string? modelPath) =>
@@ -617,6 +619,67 @@ namespace MovaCore.Tests
             Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
 
             Assert.Equal(1, detector.Calls);
+        }
+
+        // Voice input turned off frees the model's memory; turned on again, it loads it again
+        [Fact]
+        public async Task Disabling_FreesTheModel()
+        {
+            await WaitUntil(() => _recognizer.Preloads.Count > 0);
+
+            _orchestrator.Configure(SpeechSettings.Disabled);
+            await WaitUntil(() => _recognizer.Unloads > 0);
+
+            lock (_recognizer.Preloads) _recognizer.Preloads.Clear();
+            _orchestrator.Configure(Settings(_modelPath));
+            await WaitUntil(() => _recognizer.Preloads.Count > 0);
+        }
+
+        // A deleted model is freed although voice input stays on
+        [Fact]
+        public async Task MissingModel_IsFreed()
+        {
+            File.Delete(_modelPath);
+
+            _orchestrator.Configure(Settings(_modelPath));
+
+            await WaitUntil(() => _recognizer.Unloads > 0);
+        }
+
+        // "Я думаю, що" then "Так буде краще." becomes one sentence
+        [Fact]
+        public void NextPhrase_ContinuesThePreviousDictation()
+        {
+            var target = new FakeDictationTarget();
+            using var context = new DictationContext(target);
+            Recreate(context: context);
+
+            _recognizer.Segments = new[] { " Я думаю, що" };
+            Dictate();
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+            _recognizer.Segments = new[] { " Так буде краще." };
+            Dictate();
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+
+            Assert.Equal(" так буде краще.", _clipboard.LastSetText);
+        }
+
+        [Fact]
+        public void AfterAKeyPress_ThePhraseStandsAlone()
+        {
+            var target = new FakeDictationTarget();
+            using var context = new DictationContext(target);
+            Recreate(context: context);
+
+            _recognizer.Segments = new[] { " Я думаю, що" };
+            Dictate();
+            NextIdle();
+            target.Interrupt();
+            _recognizer.Segments = new[] { " Так." };
+            Dictate();
+            NextIdle();
+
+            Assert.Equal("Так.", _clipboard.LastSetText);
         }
 
         private static float[] Scale(float[] samples, float factor)

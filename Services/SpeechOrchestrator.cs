@@ -20,6 +20,7 @@ namespace MovaCore.Services
         private readonly IAudioRecorder _recorder;
         private readonly ISpeechRecognizer _recognizer;
         private readonly ISpeechDetector? _detector;
+        private readonly DictationContext? _context;
         private readonly TextPaster _paster;
         private readonly Channel<Command> _commands =
             Channel.CreateUnbounded<Command>(new UnboundedChannelOptions { SingleReader = true });
@@ -41,12 +42,16 @@ namespace MovaCore.Services
         private bool _detectorFailed;
 
         /// <param name="detector">Voice activity detection; without it, an energy threshold decides what is silence.</param>
-        public SpeechOrchestrator(IAudioRecorder recorder, ISpeechRecognizer recognizer, TextPaster paster, ISpeechDetector? detector = null)
+        /// <param name="context">The previous dictation, which the next phrase may continue; without it, none does.</param>
+        public SpeechOrchestrator(
+            IAudioRecorder recorder, ISpeechRecognizer recognizer, TextPaster paster, ISpeechDetector? detector = null,
+            DictationContext? context = null)
         {
             _recorder = recorder;
             _recognizer = recognizer;
             _paster = paster;
             _detector = detector;
+            _context = context;
             _loop = Task.Run(RunAsync);
         }
 
@@ -91,7 +96,8 @@ namespace MovaCore.Services
 
         /// <summary>
         /// Applies the settings. With dictation on and the model on disk, the model is loaded right away and stays
-        /// loaded, so that no dictation waits for it.
+        /// loaded, so that no dictation waits for it. With dictation off, or the model gone (deleted), its memory is
+        /// freed.
         /// </summary>
         public void Configure(SpeechSettings settings)
         {
@@ -100,9 +106,16 @@ namespace MovaCore.Services
             {
                 Cancel();
                 Post(new CloseMicrophone(null));
+                Post(new UnloadRequested());
             }
             else if (SpeechModelFile.Check(settings.ModelPath) == SpeechModelFormat.Ggml)
+            {
                 Post(new PreloadRequested(new SpeechOptions(settings.ModelPath!, settings.Language, settings.UseGpu)));
+            }
+            else
+            {
+                Post(new UnloadRequested());
+            }
         }
 
         /// <summary>Called on the hook thread: never blocks.</summary>
@@ -163,6 +176,9 @@ namespace MovaCore.Services
                     break;
                 case PreloadRequested preload:
                     _ = PreloadAsync(preload.Options, generation: null);
+                    break;
+                case UnloadRequested:
+                    _ = UnloadAsync();
                     break;
             }
         }
@@ -307,6 +323,18 @@ namespace MovaCore.Services
             }
         }
 
+        private async Task UnloadAsync()
+        {
+            try
+            {
+                await _recognizer.UnloadAsync();
+            }
+            catch (Exception ex)
+            {
+                AppLog.Error("Could not free the speech model", ex);
+            }
+        }
+
         private async Task TranscribeAsync(float[] samples, SpeechOptions options, bool restoreClipboard,
             SpeechOutcome noSpeech, int generation, CancellationToken cancellationToken)
         {
@@ -340,7 +368,13 @@ namespace MovaCore.Services
                     else
                     {
                         cancellationToken.ThrowIfCancellationRequested();
+                        // A phrase that continues the previous dictation gets a space, and no capital mid-sentence
+                        text = TranscriptJoiner.Join(_context?.TextBefore(), text);
                         PasteResult result = await _paster.PasteAsync(text, restoreClipboard);
+                        if (result == PasteResult.Pasted)
+                            _context?.Remember(text);
+                        else
+                            _context?.Forget();
                         (outcome, error) = result switch
                         {
                             PasteResult.Pasted => (SpeechOutcome.Pasted, (SpeechError?)null),
@@ -514,5 +548,6 @@ namespace MovaCore.Services
         private sealed record PreloadFailed(int Generation, Exception Error) : Command;
         private sealed record WorkDone(int Generation, SpeechOutcome Outcome, SpeechError? Error, string? Detail) : Command;
         private sealed record PreloadRequested(SpeechOptions Options) : Command;
+        private sealed record UnloadRequested : Command;
     }
 }

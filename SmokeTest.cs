@@ -90,6 +90,7 @@ namespace MovaCore
                         case 6:
                             await CheckRecordingIndicatorAsync();
                             CheckIcons();
+                            await CheckDictationTargetAsync(hotkeys);
                             break;
                         case 7:
                             CheckFileDialog(form!);
@@ -99,6 +100,7 @@ namespace MovaCore
                             break;
                         case 9:
                             await CheckModelDownloadAsync(downloader);
+                            CheckModelDeletion(downloader);
                             break;
                         default:
                             form?.Close();
@@ -243,6 +245,33 @@ namespace MovaCore
             await Task.Delay(500); // it fades out
             if (overlay.Visible) AppLog.Error("Smoke test: the recording indicator did not hide");
             AppLog.Info("Smoke test: recording indicator checked");
+        }
+
+        // The next phrase continues the previous dictation only until the user clicks: raw input must report a click
+        // while watched, and only then
+        private static async Task CheckDictationTargetAsync(IHotkeyService hotkeys)
+        {
+            using var target = new WindowsDictationTarget(hotkeys);
+            AppLog.Info($"Smoke test: focus {(target.GetFocus() is { } focus ? $"window {focus.Window:x}, control {focus.Control:x}" : "unknown")}");
+            int clicks = 0;
+            target.Interrupted += (_, _) => clicks++;
+            var simulator = new EventSimulator();
+
+            target.WatchClicks(true);
+            await Task.Delay(200);
+            simulator.SimulateMousePress(MouseButton.Button3); // the middle button: no click lands anywhere that matters
+            simulator.SimulateMouseRelease(MouseButton.Button3);
+            await Task.Delay(300);
+            if (clicks == 0) AppLog.Error("Smoke test: a mouse click was not noticed");
+
+            target.WatchClicks(false);
+            await Task.Delay(200);
+            int seen = clicks;
+            simulator.SimulateMousePress(MouseButton.Button3);
+            simulator.SimulateMouseRelease(MouseButton.Button3);
+            await Task.Delay(300);
+            if (clicks != seen) AppLog.Error("Smoke test: mouse clicks were still watched after stopping");
+            AppLog.Info("Smoke test: click watching checked");
         }
 
         private static Bitmap Render(Control control)
@@ -397,6 +426,28 @@ namespace MovaCore
             float[] kept = AudioSamples.KeepSegments(speech, segments);
             AppLog.Info($"Smoke test: voice activity detection kept {AudioSamples.Duration(kept.Length).TotalSeconds:0.00} s " +
                 $"of {AudioSamples.Duration(speech.Length).TotalSeconds:0.00} s in {segments.Count} segment(s)");
+        }
+
+        // Deleting a downloaded model (the Delete button), on a copy in a temporary folder
+        private static void CheckModelDeletion(ModelDownloader downloader)
+        {
+            string folder = Path.Combine(Path.GetTempPath(), "MovaCore-smoke-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                using var manager = new ModelDownloadManager(downloader, folder);
+                SpeechModelInfo model = SpeechModelCatalog.Find(SpeechModelCatalog.DefaultId)!;
+                Directory.CreateDirectory(folder);
+                File.WriteAllBytes(manager.PathOf(model), "lmgg"u8.ToArray());
+                manager.Delete(model);
+                if (manager.IsDownloaded(model) || !manager.WasDeleted(model))
+                    AppLog.Error("Smoke test: the model was not deleted");
+                else
+                    AppLog.Info("Smoke test: model deletion checked");
+            }
+            finally
+            {
+                if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+            }
         }
 
         // A 4 KB range request for the default model: TLS, the redirect to the CDN and the hash header, in the

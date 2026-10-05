@@ -78,6 +78,7 @@ namespace MovaCore
             _hotkeyService.HookFailed += OnHookFailed;
             _speech.StateChanged += OnSpeechStateChanged;
             _downloads.StateChanged += OnDownloadStateChanged;
+            _downloads.ModelDeleted += OnModelDeleted;
 
             // Applied once the handlers are in place: it may start (resume) the model download
             ApplySettings();
@@ -114,13 +115,24 @@ namespace MovaCore
                 s.RestoreClipboard));
 
             // Turning dictation on downloads the chosen model (and resumes an interrupted download at startup), unless
-            // the user has just cancelled that download in the settings
+            // the user has just cancelled that download, or deleted the model, in the settings
             ModelDownloadState download = _downloads.State;
             if (s.SpeechEnabled && SpeechModelCatalog.Selected(s.SpeechModel) is { } model
-                && !(download.Status == ModelDownloadStatus.Cancelled && download.ModelId == model.Id))
+                && !(download.Status == ModelDownloadStatus.Cancelled && download.ModelId == model.Id)
+                && !_downloads.WasDeleted(model))
             {
                 _downloads.Start(model);
             }
+        }
+
+        // A deleted model that dictation was using is freed from memory at once, not when the settings are saved
+        private void OnModelDeleted(object? sender, SpeechModelInfo model)
+        {
+            _uiContext.Post(_ =>
+            {
+                ApplySpeechSettings();
+                UpdateTrayStatus();
+            }, null);
         }
 
         private void ApplyLanguage()
@@ -431,6 +443,7 @@ namespace MovaCore
                 _hotkeyService.SpeechHotkeyReleased -= OnSpeechHotkeyReleased;
                 _speech.StateChanged -= OnSpeechStateChanged;
                 _downloads.StateChanged -= OnDownloadStateChanged;
+                _downloads.ModelDeleted -= OnModelDeleted;
                 _notifyIcon?.Dispose();
                 _overlay.Dispose();
                 _trayIcon?.Dispose();

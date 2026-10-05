@@ -22,6 +22,10 @@ All notable changes to MovaCore are documented here. The format follows
   before the key was pressed; recording also goes on for 150 ms after the release, so the last word is not cut off.
   Meanwhile Windows shows the microphone as in use, and a Bluetooth headset stays in headset mode.
 - Hesitations ("hmm", "хм") and words Whisper repeats in a loop are removed from the text.
+- A phrase dictated right after another one, into the same field and with no key pressed or click in between,
+  continues it: it gets a space, and a small first letter when the previous phrase did not end a sentence.
+- A downloaded speech model can be deleted on the Voice tab (its size is shown). Deleting the model voice input
+  uses turns voice input off; it is not downloaded again on its own.
 
 ### Changed
 - The settings window has tabs: Layout, Voice and General. Restoring the clipboard and the copy and paste keys moved

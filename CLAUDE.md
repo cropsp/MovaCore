@@ -108,8 +108,12 @@ Dictation (hold-to-talk) reuses the hook, the clipboard service and the paste:
   read before the paste, e.g. by a clipboard manager, hides the paste itself, so it then restores after a pause; it
   waits for the `ClipboardGate` instead of dropping the text). `NoSpeech`/`NoSignal` are reported only after a hold
   of ≥ 1 s. It keeps the microphone open for 30 s after a dictation (`KeepMicrophoneOpen`), loads the model when
-  configured and never frees it, enforces a 2-minute limit (a release during a UAC prompt is never seen) and reports
-  `StateChanged` (state, outcome, `SpeechError`) on a worker thread.
+  configured and frees it when dictation is turned off or the model file is gone, enforces a 2-minute limit (a
+  release during a UAC prompt is never seen) and reports `StateChanged` (state, outcome, `SpeechError`) on a worker
+  thread. Before pasting, `TranscriptJoiner` fits the phrase to `DictationContext`: the last dictated text, valid
+  only while the focus (`IDictationTarget`, i.e. `WindowsDictationTarget`: `GetGUIThreadInfo`) is unchanged and the
+  user has neither pressed a key (`IHotkeyService.UserKeyPressed`) nor clicked (`MouseClickWatcher`, raw input,
+  registered only while there is such a text); then a space goes before it, and a small letter mid-sentence.
 - **`Services/WasapiAudioRecorder.cs`** (Windows-only) records through NAudio's `WasapiRecorder` in shared mode with
   AutoConvertPcm, so the audio engine delivers 16 kHz mono float; microphones are stored by endpoint ID. While open
   it keeps the last 0.5 s in a ring: a recording on an open microphone starts with 0.3 s from before the press, and
@@ -126,7 +130,8 @@ Dictation (hold-to-talk) reuses the hook, the clipboard service and the paste:
   Hugging Face into `<file>.partial` (range requests resume it), follows redirects by hand to read the SHA-256 in
   `X-Linked-Etag`, checks size, hash (pinned in the catalog: whisper.cpp's SHA-1, or for q8_0 the SHA-256 recorded from Hugging Face)
   and the ggml magic (`SpeechModelFile`).
-  `ModelDownloadManager` runs one download in the background; enabling dictation starts it (and startup resumes it).
+  `ModelDownloadManager` runs one download in the background; enabling dictation starts it (and startup resumes it),
+  except for a model the user deleted (`Delete`, the Voice tab's button) in this session.
 - `TrayApplicationContext` swaps the tray icon (red/amber dot) and drives `UI/RecordingOverlay.cs`, a click-through
   window that never takes the focus (`WS_EX_NOACTIVATE`, `ShowWithoutActivation`): a grey pulse until the microphone
   delivers, then a red dot and an equalizer (`SpectrumAnalyzer`, Handy's algorithm), an amber wave if transcribing

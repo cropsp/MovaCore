@@ -33,6 +33,12 @@ namespace MovaCore.Services
         /// <summary>Raised on the hook thread when the speech hotkey is released.</summary>
         event EventHandler? SpeechHotkeyReleased;
 
+        /// <summary>
+        /// Raised on the hook thread when the user presses a key (not a modifier alone, not the dictation hotkey, not
+        /// our simulated keys): they typed, moved the caret or converted. Handlers must return at once.
+        /// </summary>
+        event EventHandler? UserKeyPressed;
+
         /// <summary>Raised on a worker thread when the hook cannot start or stops with an error.</summary>
         event EventHandler<Exception>? HookFailed;
 

@@ -127,5 +127,59 @@ namespace MovaCore.Tests
             Assert.Null(new ModelDownloadState(ModelDownloadStatus.Downloading, "x", 10, null, null).Percent);
             Assert.Equal(25, new ModelDownloadState(ModelDownloadStatus.Downloading, "x", 25, 100, null).Percent);
         }
+
+        [Fact]
+        public void Delete_RemovesTheModelAndItsUnfinishedDownload()
+        {
+            Directory.CreateDirectory(_directory);
+            File.WriteAllBytes(_manager.PathOf(_model), _content);
+            File.WriteAllBytes(ModelDownloader.PartialPathOf(_manager.PathOf(_model)), _content[..100]);
+            SpeechModelInfo? deleted = null;
+            _manager.ModelDeleted += (_, model) => deleted = model;
+
+            Assert.Equal(_content.Length, _manager.SizeOnDisk(_model));
+            _manager.Delete(_model);
+
+            Assert.False(_manager.IsDownloaded(_model));
+            Assert.Null(_manager.SizeOnDisk(_model));
+            Assert.False(File.Exists(ModelDownloader.PartialPathOf(_manager.PathOf(_model))));
+            Assert.Same(_model, deleted);
+            Assert.True(_manager.WasDeleted(_model));
+        }
+
+        // Without even the models folder there is nothing to delete, and no error
+        [Fact]
+        public void Delete_WithoutTheModel_DoesNothing()
+        {
+            _manager.Delete(_model);
+
+            Assert.True(_manager.WasDeleted(_model));
+        }
+
+        [Fact]
+        public async Task Delete_WhileDownloadingIt_IsRefused()
+        {
+            _http.Route(Url, _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new StallingStream()) });
+            _manager.Start(_model);
+
+            Assert.Throws<InvalidOperationException>(() => _manager.Delete(_model));
+
+            _manager.Cancel();
+            await _manager.WhenIdleAsync();
+        }
+
+        // Asking for the download again is the user's decision: the model is no longer marked as deleted
+        [Fact]
+        public async Task Start_AfterDelete_ClearsTheMark()
+        {
+            _manager.Delete(_model);
+            _http.File(Url, _content);
+
+            _manager.Start(_model);
+            await _manager.WhenIdleAsync();
+
+            Assert.False(_manager.WasDeleted(_model));
+            Assert.True(_manager.IsDownloaded(_model));
+        }
     }
 }

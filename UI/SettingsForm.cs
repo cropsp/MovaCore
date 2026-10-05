@@ -178,6 +178,7 @@ namespace MovaCore.UI
             {
                 Strings.SpeechModelNotDownloaded(Strings.FormatSize(1_624_600_000)),
                 Strings.SpeechModelDownloading(Strings.FormatSize(1_624_600_000), Strings.FormatSize(1_624_600_000), 100),
+                Strings.SpeechModelDownloadedSize(Strings.FormatSize(1_624_600_000)),
                 Strings.SpeechCustomGguf,
                 Strings.SpeechCustomNone,
             };
@@ -636,10 +637,10 @@ namespace MovaCore.UI
                 action = Strings.Cancel;
                 showProgress = true;
             }
-            else if (_downloads.IsDownloaded(model))
+            else if (_downloads.SizeOnDisk(model) is long size)
             {
-                status = Strings.SpeechModelReady;
-                showAction = false;
+                status = Strings.SpeechModelDownloadedSize(Strings.FormatSize(size));
+                action = Strings.SpeechModelDelete;
             }
             else if (thisModel && state.Status == ModelDownloadStatus.Failed && state.Error is { } error)
             {
@@ -671,9 +672,35 @@ namespace MovaCore.UI
             ModelDownloadState state = _downloads.State;
             if (state.Status == ModelDownloadStatus.Downloading && state.ModelId == model.Id)
                 _downloads.Cancel();
+            else if (_downloads.IsDownloaded(model))
+                DeleteModel(model);
             else
                 _downloads.Start(model);
             UpdateModelStatus();
+        }
+
+        private void DeleteModel(SpeechModelInfo model)
+        {
+            // The model voice input runs on: deleting it turns voice input off, or saving would leave it without one
+            bool inUse = _speechEnabledCheckBox.Checked && model.Id == _settings.SpeechModel;
+            string size = Strings.FormatSize(_downloads.SizeOnDisk(model) ?? model.ApproximateBytes);
+            string question = Strings.SpeechModelDeleteConfirm(Strings.SpeechModelShortName(model), size);
+            if (inUse) question += Environment.NewLine + Environment.NewLine + Strings.SpeechModelDeleteTurnsOffVoice;
+            DialogResult answer = MessageBox.Show(
+                this, question, Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+            if (answer != DialogResult.Yes) return;
+
+            try
+            {
+                _downloads.Delete(model);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                AppLog.Info($"Could not delete the speech model: {ex.Message}");
+                MessageBox.Show(this, Strings.SpeechModelDeleteFailed(ex.Message), Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            if (inUse) _speechEnabledCheckBox.Checked = false;
         }
 
         // Raised on a worker thread

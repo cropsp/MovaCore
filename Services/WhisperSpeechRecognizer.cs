@@ -109,6 +109,22 @@ namespace MovaCore.Services
                 }
             }, cancellationToken);
 
+        public Task UnloadAsync() =>
+            Task.Run(async () =>
+            {
+                await _lock.WaitAsync();
+                try
+                {
+                    if (_processor == null) return;
+                    Free();
+                    AppLog.Info("Speech model unloaded");
+                }
+                finally
+                {
+                    _lock.Release();
+                }
+            });
+
         /// <summary>
         /// Chooses and loads the native runtime, as the first dictation would, and describes it (for the smoke test).
         /// </summary>
