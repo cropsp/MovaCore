@@ -10,14 +10,16 @@ namespace MovaCore.Services
 {
     /// <summary>
     /// Hold-to-talk dictation: the hotkey press starts recording (and loads the model meanwhile), the release stops it,
-    /// and the recognized text is pasted into the focused application. Hotkey events arrive on the hook thread, which
-    /// must not block, so every event becomes a command processed in order by one worker loop; transcription runs
-    /// beside the loop so that a cancellation is handled at once.
+    /// voice activity detection keeps the speech, and the recognized text is pasted into the focused application. The
+    /// microphone stays open for a while after a dictation, so that the next one starts at once. Hotkey events arrive
+    /// on the hook thread, which must not block, so every event becomes a command processed in order by one worker
+    /// loop; transcription runs beside the loop so that a cancellation is handled at once.
     /// </summary>
     public sealed class SpeechOrchestrator : IDisposable
     {
         private readonly IAudioRecorder _recorder;
         private readonly ISpeechRecognizer _recognizer;
+        private readonly ISpeechDetector? _detector;
         private readonly TextPaster _paster;
         private readonly Channel<Command> _commands =
             Channel.CreateUnbounded<Command>(new UnboundedChannelOptions { SingleReader = true });
@@ -32,13 +34,19 @@ namespace MovaCore.Services
         private SpeechOptions? _options;
         private bool _restoreClipboard;
         private long _recordingStarted;
+        private TimeSpan _held; // how long the hotkey was held, once it is released
+        private bool _finishing; // released; the last moments are still being recorded
         private bool _ignoreNextRelease;
+        private int _closeTicket; // identifies the pending close of the microphone; a press makes it stale
+        private bool _detectorFailed;
 
-        public SpeechOrchestrator(IAudioRecorder recorder, ISpeechRecognizer recognizer, TextPaster paster)
+        /// <param name="detector">Voice activity detection; without it, an energy threshold decides what is silence.</param>
+        public SpeechOrchestrator(IAudioRecorder recorder, ISpeechRecognizer recognizer, TextPaster paster, ISpeechDetector? detector = null)
         {
             _recorder = recorder;
             _recognizer = recognizer;
             _paster = paster;
+            _detector = detector;
             _loop = Task.Run(RunAsync);
         }
 
@@ -47,8 +55,16 @@ namespace MovaCore.Services
 
         public SpeechState State => _state;
 
-        /// <summary>The microphone level while recording, from 0 to 1.</summary>
-        public float CurrentLevel => _state == SpeechState.Recording ? _recorder.CurrentLevel : 0;
+        /// <summary>
+        /// While recording, the latest audio for the level meter (see <see cref="IAudioRecorder.CopyRecent"/>); otherwise
+        /// nothing, and 0 is returned. Called from the UI thread.
+        /// </summary>
+        public int CopyRecentAudio(Span<float> destination)
+        {
+            if (_state == SpeechState.Recording) return _recorder.CopyRecent(destination);
+            destination.Clear();
+            return 0;
+        }
 
         /// <summary>Shorter presses are taken as accidental and discarded.</summary>
         internal TimeSpan MinRecording { get; init; } = TimeSpan.FromSeconds(0.3);
@@ -59,6 +75,21 @@ namespace MovaCore.Services
         internal static TimeSpan MinAudioLength { get; } = TimeSpan.FromSeconds(1.25);
 
         /// <summary>
+        /// How long the microphone stays open after a dictation: the next one starts at once, with the moment before the
+        /// press. Windows shows the microphone as in use meanwhile, and a Bluetooth headset stays in headset mode.
+        /// </summary>
+        internal TimeSpan KeepMicrophoneOpen { get; init; } = TimeSpan.FromSeconds(30);
+
+        /// <summary>
+        /// Recording goes on this long after the release: the audio still on its way from the device, and the end of the
+        /// last word, which people often say while letting go.
+        /// </summary>
+        internal TimeSpan TrailingAudio { get; init; } = TimeSpan.FromMilliseconds(150);
+
+        /// <summary>A recording discarded after a hold this long is reported (no speech, no signal); a shorter one is not.</summary>
+        internal TimeSpan NoticeableHold { get; init; } = TimeSpan.FromSeconds(1);
+
+        /// <summary>
         /// Applies the settings. With dictation on and the model on disk, the model is loaded right away and stays
         /// loaded, so that no dictation waits for it.
         /// </summary>
@@ -66,7 +97,10 @@ namespace MovaCore.Services
         {
             _settings = settings;
             if (!settings.Enabled)
+            {
                 Cancel();
+                Post(new CloseMicrophone(null));
+            }
             else if (SpeechModelFile.Check(settings.ModelPath) == SpeechModelFormat.Ggml)
                 Post(new PreloadRequested(new SpeechOptions(settings.ModelPath!, settings.Language, settings.UseGpu)));
         }
@@ -111,6 +145,12 @@ namespace MovaCore.Services
                 case Released released:
                     OnReleased(released.Generation);
                     break;
+                case FinishRecording finish when finish.Generation == _generation && _state == SpeechState.Recording && _finishing:
+                    OnFinish();
+                    break;
+                case CloseMicrophone close when _state == SpeechState.Idle && (close.Ticket == null || close.Ticket == _closeTicket):
+                    CloseRecorderQuietly();
+                    break;
                 case CancelRequested:
                     OnCancel();
                     break;
@@ -129,10 +169,11 @@ namespace MovaCore.Services
 
         private void OnPressed()
         {
-            // A press during transcription is ignored, and so is its release
-            if (_state == SpeechState.Transcribing) _ignoreNextRelease = true;
+            // A press during transcription (or the last moments of a recording) is ignored, and so is its release
+            if (_state == SpeechState.Transcribing || _finishing) _ignoreNextRelease = true;
             if (_state != SpeechState.Idle) return;
             _ignoreNextRelease = false;
+            _closeTicket++; // the microphone is needed again
 
             SpeechSettings settings = _settings;
             if (!settings.Enabled) return;
@@ -183,35 +224,55 @@ namespace MovaCore.Services
                 _ignoreNextRelease = false;
                 return;
             }
-            if (_state != SpeechState.Recording || (limitGeneration != null && limitGeneration != _generation)) return;
+            if (_state != SpeechState.Recording || _finishing || (limitGeneration != null && limitGeneration != _generation)) return;
             if (limitGeneration != null) AppLog.Info("Dictation: the recording reached its time limit");
 
-            float[] samples = _recorder.Stop();
-            TimeSpan held = Stopwatch.GetElapsedTime(_recordingStarted);
-            TimeSpan audio = AudioSamples.Duration(samples.Length);
-
-            if (held < MinRecording)
+            _held = Stopwatch.GetElapsedTime(_recordingStarted);
+            _finishing = true;
+            if (TrailingAudio <= TimeSpan.Zero)
             {
-                Discard($"the hotkey was held for only {held.TotalSeconds:0.00} s");
+                OnFinish();
                 return;
             }
+            int generation = _generation;
+            _ = Task.Delay(TrailingAudio, _workCts!.Token).ContinueWith(
+                t => Post(new FinishRecording(generation)), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion,
+                TaskScheduler.Default);
+        }
+
+        private void OnFinish()
+        {
+            _finishing = false;
+            float[] samples = _recorder.Stop();
+            TimeSpan audio = AudioSamples.Duration(samples.Length);
+
+            if (_held < MinRecording)
+            {
+                Array.Clear(samples);
+                Discard($"the hotkey was held for only {_held.TotalSeconds:0.00} s", SpeechOutcome.Discarded);
+                return;
+            }
+            float peak = AudioSamples.Peak(samples);
             if (AudioSamples.IsAllZero(samples))
             {
                 // Seen with drivers whose native format is captured wrongly: worth knowing when nothing ever works
-                Discard($"the microphone delivered {audio.TotalSeconds:0.0} s of digital silence (all zeros)");
+                Array.Clear(samples);
+                Discard($"the microphone delivered {audio.TotalSeconds:0.0} s of digital silence (all zeros)", SpeechOutcome.NoSignal);
                 return;
             }
-            if (AudioSamples.IsSilent(samples))
+            if (peak < AudioSamples.SignalPeak)
             {
-                Discard($"{audio.TotalSeconds:0.0} s of audio without speech (peak {AudioSamples.ToDecibels(AudioSamples.Peak(samples)):0} dBFS)");
+                Array.Clear(samples);
+                Discard($"{audio.TotalSeconds:0.0} s of audio without a signal (peak {AudioSamples.ToDecibels(peak):0} dBFS)",
+                    SpeechOutcome.NoSignal);
                 return;
             }
 
             // Levels only, never the audio: they tell a quiet microphone from a problem elsewhere
-            AppLog.Info($"Dictation: {audio.TotalSeconds:0.0} s recorded, peak {AudioSamples.ToDecibels(AudioSamples.Peak(samples)):0} dBFS, " +
+            AppLog.Info($"Dictation: {audio.TotalSeconds:0.0} s recorded, peak {AudioSamples.ToDecibels(peak):0} dBFS, " +
                 $"RMS {AudioSamples.ToDecibels(AudioSamples.Rms(samples)):0} dBFS");
             SetState(new SpeechStateChangedEventArgs(SpeechState.Transcribing));
-            _ = TranscribeAsync(samples, _options!, _restoreClipboard, _generation, _workCts!.Token);
+            _ = TranscribeAsync(samples, _options!, _restoreClipboard, NoSpeechOutcome(), _generation, _workCts!.Token);
         }
 
         private void OnCancel()
@@ -246,40 +307,48 @@ namespace MovaCore.Services
             }
         }
 
-        private async Task TranscribeAsync(
-            float[] samples, SpeechOptions options, bool restoreClipboard, int generation, CancellationToken cancellationToken)
+        private async Task TranscribeAsync(float[] samples, SpeechOptions options, bool restoreClipboard,
+            SpeechOutcome noSpeech, int generation, CancellationToken cancellationToken)
         {
             SpeechOutcome outcome;
             SpeechError? error = null;
             string? detail = null;
             try
             {
-                long started = Stopwatch.GetTimestamp();
-                float[] audio = AudioSamples.PadToMinimum(samples, MinAudioLength);
-                IReadOnlyList<string> segments = await _recognizer.TranscribeAsync(audio, options, cancellationToken);
-                string text = TranscriptText.Clean(segments);
-
-                // Never log the text itself: it is what the user said
-                AppLog.Info($"Dictation: {AudioSamples.Duration(samples.Length).TotalSeconds:0.0} s of audio transcribed in " +
-                    $"{Stopwatch.GetElapsedTime(started).TotalSeconds:0.00} s, {text.Length} characters");
-                Array.Clear(samples);
-                Array.Clear(audio);
-
-                if (text.Length == 0)
+                float[]? speech = await KeepSpeechAsync(samples, options, cancellationToken);
+                if (speech == null)
                 {
-                    outcome = SpeechOutcome.Discarded;
+                    outcome = noSpeech;
                 }
                 else
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    PasteResult result = await _paster.PasteAsync(text, restoreClipboard);
-                    (outcome, error) = result switch
+                    long started = Stopwatch.GetTimestamp();
+                    float[] audio = AudioSamples.PadToMinimum(speech, MinAudioLength);
+                    IReadOnlyList<string> segments = await _recognizer.TranscribeAsync(audio, options, cancellationToken);
+                    string text = TranscriptText.Clean(segments);
+
+                    // Never log the text itself: it is what the user said
+                    AppLog.Info($"Dictation: {AudioSamples.Duration(speech.Length).TotalSeconds:0.0} s of speech transcribed in " +
+                        $"{Stopwatch.GetElapsedTime(started).TotalSeconds:0.00} s, {text.Length} characters");
+                    Array.Clear(speech);
+                    Array.Clear(audio);
+
+                    if (text.Length == 0)
                     {
-                        PasteResult.Pasted => (SpeechOutcome.Pasted, (SpeechError?)null),
-                        PasteResult.NotObserved => (SpeechOutcome.NotPasted, null),
-                        _ => (SpeechOutcome.Failed, SpeechError.ClipboardFailed),
-                    };
-                    if (result != PasteResult.Pasted) AppLog.Info($"Dictation: paste result {result}");
+                        outcome = SpeechOutcome.Discarded;
+                    }
+                    else
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        PasteResult result = await _paster.PasteAsync(text, restoreClipboard);
+                        (outcome, error) = result switch
+                        {
+                            PasteResult.Pasted => (SpeechOutcome.Pasted, (SpeechError?)null),
+                            PasteResult.NotObserved => (SpeechOutcome.NotPasted, null),
+                            _ => (SpeechOutcome.Failed, SpeechError.ClipboardFailed),
+                        };
+                        if (result != PasteResult.Pasted) AppLog.Info($"Dictation: paste result {result}");
+                    }
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -290,14 +359,63 @@ namespace MovaCore.Services
             {
                 (outcome, error, detail) = Describe(ex);
             }
+            Array.Clear(samples); // the audio is not kept a moment longer than needed
             Post(new WorkDone(generation, outcome, error, detail));
         }
 
-        private void Discard(string reason)
+        /// <summary>
+        /// The speech in the recording, with the silence around and between it removed, or null if there is none.
+        /// Without a voice activity detector (or if it fails), an energy threshold decides, and the audio stays whole.
+        /// </summary>
+        private async Task<float[]?> KeepSpeechAsync(float[] samples, SpeechOptions options, CancellationToken cancellationToken)
+        {
+            IReadOnlyList<SpeechSegment>? segments = null;
+            if (_detector != null && !_detectorFailed)
+            {
+                try
+                {
+                    segments = await _detector.DetectSpeechAsync(samples, options, cancellationToken);
+                }
+                catch (SpeechException ex)
+                {
+                    // The recognizer reports the same problem (e.g. a missing runtime) in a moment
+                    AppLog.Info($"Dictation: voice activity detection is not available ({ex.Error})");
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // Once: every dictation would fail the same way
+                    _detectorFailed = true;
+                    AppLog.Error("Voice activity detection failed; using an energy threshold from now on", ex);
+                }
+            }
+
+            if (segments == null)
+            {
+                if (!AudioSamples.IsSilent(samples)) return samples;
+                AppLog.Info("Dictation discarded: no frame was loud enough to be speech");
+                return null;
+            }
+            if (segments.Count == 0)
+            {
+                AppLog.Info("Dictation discarded: voice activity detection found no speech");
+                return null;
+            }
+
+            float[] speech = AudioSamples.KeepSegments(samples, segments);
+            AppLog.Info($"Dictation: voice activity detection kept {AudioSamples.Duration(speech.Length).TotalSeconds:0.0} s " +
+                $"in {segments.Count} segment(s)");
+            return speech;
+        }
+
+        // Reported only after a deliberate hold: a short tap that caught nothing is not worth a message
+        private SpeechOutcome NoSpeechOutcome() => _held >= NoticeableHold ? SpeechOutcome.NoSpeech : SpeechOutcome.Discarded;
+
+        /// <param name="outcome">Discarded, or what to report after a deliberate hold.</param>
+        private void Discard(string reason, SpeechOutcome outcome)
         {
             AppLog.Info($"Dictation discarded: {reason}");
             _workCts?.Cancel();
-            SetIdle(SpeechOutcome.Discarded);
+            SetIdle(outcome == SpeechOutcome.Discarded || _held >= NoticeableHold ? outcome : SpeechOutcome.Discarded);
         }
 
         private void Fail(Exception ex)
@@ -319,6 +437,19 @@ namespace MovaCore.Services
             return (SpeechOutcome.Failed, SpeechError.Failed, ex.Message);
         }
 
+        private void CloseRecorderQuietly()
+        {
+            if (!_recorder.IsOpen) return;
+            try
+            {
+                _recorder.Close();
+            }
+            catch (Exception ex)
+            {
+                AppLog.Error("Could not close the microphone", ex);
+            }
+        }
+
         private void StopRecorderQuietly()
         {
             try
@@ -334,10 +465,25 @@ namespace MovaCore.Services
         private void SetIdle(SpeechOutcome outcome, SpeechError? error = null, string? detail = null)
         {
             SetState(new SpeechStateChangedEventArgs(SpeechState.Idle, outcome, error, detail));
+            if (_recorder.IsOpen) ScheduleClose();
+        }
+
+        private void ScheduleClose()
+        {
+            int ticket = ++_closeTicket;
+            if (KeepMicrophoneOpen <= TimeSpan.Zero)
+            {
+                CloseRecorderQuietly();
+                return;
+            }
+            _ = Task.Delay(KeepMicrophoneOpen, _disposeCts.Token).ContinueWith(
+                t => Post(new CloseMicrophone(ticket)), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion,
+                TaskScheduler.Default);
         }
 
         private void SetState(SpeechStateChangedEventArgs change)
         {
+            if (change.State != SpeechState.Recording) _finishing = false;
             _state = change.State;
             StateChanged?.Invoke(this, change);
         }
@@ -356,11 +502,14 @@ namespace MovaCore.Services
             }
             _workCts?.Cancel();
             if (_recorder.IsRecording) StopRecorderQuietly();
+            CloseRecorderQuietly();
         }
 
         private abstract record Command;
         private sealed record Pressed : Command;
         private sealed record Released(int? Generation) : Command;
+        private sealed record FinishRecording(int Generation) : Command;
+        private sealed record CloseMicrophone(int? Ticket) : Command; // null: now, whatever is pending
         private sealed record CancelRequested : Command;
         private sealed record PreloadFailed(int Generation, Exception Error) : Command;
         private sealed record WorkDone(int Generation, SpeechOutcome Outcome, SpeechError? Error, string? Detail) : Command;

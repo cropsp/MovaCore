@@ -46,5 +46,34 @@ namespace MovaCore.Tests
         {
             Assert.Equal("", TranscriptText.Clean(Array.Empty<string>()));
         }
+
+        [Theory]
+        [InlineData("Хм, я думаю, що так.", "Я думаю, що так.")]
+        [InlineData("Uhm, let me think.", "Let me think.")]
+        [InlineData("Ну, ммм, добре.", "Ну, добре.")]
+        [InlineData("Так, хм.", "Так.")]
+        [InlineData("Це було. Хм. Цікаво.", "Це було. Цікаво.")]
+        [InlineData("Хм?", "Хм?")]
+        [InlineData("Хмара пливе.", "Хмара пливе.")]
+        public void Hesitations_AreRemoved(string recognized, string expected)
+        {
+            Assert.Equal(expected, TranscriptText.Clean(new[] { recognized }));
+        }
+
+        [Theory]
+        [InlineData("так так так так.", "так.")]
+        [InlineData("Я я я думаю", "Я думаю")]
+        [InlineData("дуже дуже добре", "дуже дуже добре")]
+        [InlineData("ні, ні, ні.", "ні, ні, ні.")]
+        public void WordsRepeatedThreeTimes_AreKeptOnce(string recognized, string expected)
+        {
+            Assert.Equal(expected, TranscriptText.Clean(new[] { recognized }));
+        }
+
+        [Fact]
+        public void OnlyHesitations_GiveEmptyText()
+        {
+            Assert.Equal("", TranscriptText.Clean(new[] { " Хм.", " Ммм." }));
+        }
     }
 }

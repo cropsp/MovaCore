@@ -50,6 +50,9 @@
     <Compile Include="../../Services/SpeechException.cs" Link="Linked/SpeechException.cs" />
     <Compile Include="../../Services/IAudioRecorder.cs" Link="Linked/IAudioRecorder.cs" />
     <Compile Include="../../Services/ISpeechRecognizer.cs" Link="Linked/ISpeechRecognizer.cs" />
+    <Compile Include="../../Services/ISpeechDetector.cs" Link="Linked/ISpeechDetector.cs" />
+    <Compile Include="../../Models/SpeechSegment.cs" Link="Linked/SpeechSegment.cs" />
+    <Compile Include="../../Services/SpectrumAnalyzer.cs" Link="Linked/SpectrumAnalyzer.cs" />
     <Compile Include="../../Services/AudioSamples.cs" Link="Linked/AudioSamples.cs" />
     <Compile Include="../../Services/TranscriptText.cs" Link="Linked/TranscriptText.cs" />
     <Compile Include="../../Services/SpeechModelFile.cs" Link="Linked/SpeechModelFile.cs" />

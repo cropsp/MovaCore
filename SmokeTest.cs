@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -60,6 +61,9 @@ namespace MovaCore
                             IReadOnlyList<AudioInputDevice> microphones = recorder.GetInputDevices();
                             // CI runners have no microphone: listing them must work, finding none is fine
                             AppLog.Info($"Smoke test: {microphones.Count} microphone(s) found");
+                            recorder.Close(); // closing a microphone that is not open does nothing
+                            if (recorder.IsOpen || recorder.CopyRecent(new float[SpectrumAnalyzer.WindowSize]) != 0)
+                                AppLog.Error("Smoke test: a closed recorder reports audio");
                             form = new SettingsForm(new AppSettings(), _ => Task.FromResult<Hotkey?>(null), microphones, downloads);
                             form.Show();
                             break;
@@ -84,7 +88,7 @@ namespace MovaCore
                             await CheckHotkeyCaptureAsync(hotkeys);
                             break;
                         case 6:
-                            CheckRecordingIndicator();
+                            await CheckRecordingIndicatorAsync();
                             CheckIcons();
                             break;
                         case 7:
@@ -201,18 +205,64 @@ namespace MovaCore
                 AppLog.Info("Smoke test: hotkey recording checked");
         }
 
-        // The indicator must never take the focus: the recognized text goes to the window the user is typing in
-        private static void CheckRecordingIndicator()
+        // The indicator must never take the focus: the recognized text goes to the window the user is typing in. Its
+        // equalizer must react to sound, and each state must paint.
+        private static async Task CheckRecordingIndicatorAsync()
         {
             IntPtr foregroundBefore = GetForegroundWindow();
-            using var overlay = new RecordingOverlay(() => 0.5f);
+            bool sound = false;
+            using var overlay = new RecordingOverlay(buffer =>
+            {
+                if (!sound)
+                {
+                    Array.Clear(buffer);
+                    return 0; // the microphone is still opening
+                }
+                for (int i = 0; i < buffer.Length; i++) buffer[i] = 0.1f * MathF.Sin(2 * MathF.PI * 700 * i / AudioSamples.SampleRate);
+                return buffer.Length;
+            });
+
             overlay.ShowRecording();
             if (!overlay.Visible) AppLog.Error("Smoke test: the recording indicator did not show");
+            await Task.Delay(250);
+            using Bitmap waiting = Render(overlay);
+            sound = true;
+            await Task.Delay(400);
+            using Bitmap speaking = Render(overlay);
+            if (SameImage(waiting, speaking)) AppLog.Error("Smoke test: the recording indicator did not react to sound");
+
             overlay.ShowTranscribing();
-            overlay.ShowMessage(Strings.SpeechErrorText(SpeechError.MicrophoneUnavailable, null));
+            await Task.Delay(450); // the wave appears after a delay
+            Render(overlay).Dispose();
+            overlay.ShowMessage(Strings.OverlayNoSignal);
+            await Task.Delay(200);
+            Render(overlay).Dispose();
             if (GetForegroundWindow() != foregroundBefore) AppLog.Error("Smoke test: the recording indicator took the focus");
+
             overlay.HideOverlay();
+            await Task.Delay(500); // it fades out
+            if (overlay.Visible) AppLog.Error("Smoke test: the recording indicator did not hide");
             AppLog.Info("Smoke test: recording indicator checked");
+        }
+
+        private static Bitmap Render(Control control)
+        {
+            var bitmap = new Bitmap(control.Width, control.Height);
+            control.DrawToBitmap(bitmap, new Rectangle(Point.Empty, control.Size));
+            return bitmap;
+        }
+
+        private static bool SameImage(Bitmap a, Bitmap b)
+        {
+            if (a.Size != b.Size) return false;
+            for (int y = 0; y < a.Height; y++)
+            {
+                for (int x = 0; x < a.Width; x++)
+                {
+                    if (a.GetPixel(x, y) != b.GetPixel(x, y)) return false;
+                }
+            }
+            return true;
         }
 
         private static void CheckIcons()
@@ -282,12 +332,6 @@ namespace MovaCore
                 return;
             }
 
-            if (modelPath == null)
-            {
-                AppLog.Info("Smoke test: no model given (--smoke-test-model), transcription not checked");
-                return;
-            }
-
             // A recording of "hello world" if CI could make one, a second of a tone otherwise
             float[] audio;
             if (audioPath != null)
@@ -302,6 +346,14 @@ namespace MovaCore
             }
 
             using var recognizer = new WhisperSpeechRecognizer();
+            await CheckVoiceActivityDetectionAsync(recognizer, audioPath != null ? audio : null);
+
+            if (modelPath == null)
+            {
+                AppLog.Info("Smoke test: no model given (--smoke-test-model), transcription not checked");
+                return;
+            }
+
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             var watch = Stopwatch.StartNew();
             IReadOnlyList<string> segments = await recognizer.TranscribeAsync(
@@ -313,6 +365,38 @@ namespace MovaCore
             AppLog.Info($"Smoke test: transcribed in {watch.Elapsed.TotalSeconds:0.0} s: \"{text}\"");
             if (audioPath != null && !text.Contains("hello", StringComparison.OrdinalIgnoreCase))
                 AppLog.Error("Smoke test: the recording of \"hello world\" was not recognized");
+        }
+
+        // The Silero model ships with the app: speech must be found in the recording and none in silence
+        private static async Task CheckVoiceActivityDetectionAsync(WhisperSpeechRecognizer recognizer, float[]? speech)
+        {
+            if (!File.Exists(WhisperSpeechRecognizer.VadModelPath))
+            {
+                AppLog.Error($"Smoke test: the voice activity model is missing ({WhisperSpeechRecognizer.VadModelPath})");
+                return;
+            }
+
+            var options = new SpeechOptions("", "en", UseGpu: true);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            IReadOnlyList<SpeechSegment>? silence = await recognizer.DetectSpeechAsync(
+                new float[AudioSamples.SampleRate * 2], options, timeout.Token);
+            if (silence is not { Count: 0 })
+                AppLog.Error($"Smoke test: voice activity detection found speech in silence ({silence?.Count.ToString() ?? "no detector"})");
+
+            if (speech == null)
+            {
+                AppLog.Info("Smoke test: voice activity detection loaded; no recording to check it on");
+                return;
+            }
+            IReadOnlyList<SpeechSegment>? segments = await recognizer.DetectSpeechAsync(speech, options, timeout.Token);
+            if (segments is not { Count: > 0 })
+            {
+                AppLog.Error("Smoke test: voice activity detection found no speech in the recording");
+                return;
+            }
+            float[] kept = AudioSamples.KeepSegments(speech, segments);
+            AppLog.Info($"Smoke test: voice activity detection kept {AudioSamples.Duration(kept.Length).TotalSeconds:0.00} s " +
+                $"of {AudioSamples.Duration(speech.Length).TotalSeconds:0.00} s in {segments.Count} segment(s)");
         }
 
         // A 4 KB range request for the default model: TLS, the redirect to the CDN and the hash header, in the

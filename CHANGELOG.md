@@ -13,13 +13,21 @@ All notable changes to MovaCore are documented here. The format follows
   smaller variant can be chosen, or a whisper.cpp model file of your own) in the background, checks it against its
   hash and resumes an interrupted download at the next start. This is the only network connection MovaCore makes.
 - While dictating, the tray icon shows a red dot (amber while recognizing), and a small indicator at the bottom of the
-  screen shows the microphone level without taking the focus.
+  screen shows an equalizer of your voice without taking the focus. It pulses grey until the microphone is ready, and
+  shows an amber wave if recognition takes a moment.
+- Voice activity detection (Silero VAD, shipped in a `models` folder) decides what is speech: quiet microphones work,
+  silence is not sent to Whisper (which would invent phrases), and pauses are cut out. After a deliberate hold, the
+  indicator says when no speech was heard or the microphone delivered no signal.
+- The microphone stays open for 30 seconds after a dictation, so the next one starts at once and keeps the moment
+  before the key was pressed; recording also goes on for 150 ms after the release, so the last word is not cut off.
+  Meanwhile Windows shows the microphone as in use, and a Bluetooth headset stays in headset mode.
+- Hesitations ("hmm", "хм") and words Whisper repeats in a loop are removed from the text.
 
 ### Changed
 - The settings window has tabs: Layout, Voice and General. Restoring the clipboard and the copy and paste keys moved
   to General, since they apply to dictation too.
-- The release archives contain a `runtimes` folder (speech recognition, with the Visual C++ runtime it needs) and
-  `THIRD-PARTY-NOTICES.txt`; the x64 archive is larger mostly because of the Vulkan build of whisper.cpp.
+- The release archives contain `runtimes` and `models` folders (speech recognition, with the Visual C++ runtime it
+  needs) and `THIRD-PARTY-NOTICES.txt`; the x64 archive is larger mostly because of the Vulkan build of whisper.cpp.
 
 ## [1.1.0] - 2026-10-01
 

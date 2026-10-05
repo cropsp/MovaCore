@@ -62,7 +62,7 @@ namespace MovaCore
             _trayIcon = LoadTrayIcon(AppResources.LoadIcon);
             _recordingIcon = LoadTrayIcon(AppResources.LoadRecordingIcon);
             _transcribingIcon = LoadTrayIcon(AppResources.LoadTranscribingIcon);
-            _overlay = new RecordingOverlay(() => _speech.CurrentLevel);
+            _overlay = new RecordingOverlay(buffer => _speech.CopyRecentAudio(buffer));
             _notifyIcon = new NotifyIcon
             {
                 Icon = _trayIcon ?? SystemIcons.Application,
@@ -215,6 +215,8 @@ namespace MovaCore
                     && _downloads.State.Status == ModelDownloadStatus.Downloading
                     => Strings.SpeechModelStillDownloading(_downloads.State.Percent),
                 SpeechOutcome.Failed => Strings.SpeechErrorText(e.Error ?? SpeechError.Failed, e.Detail),
+                SpeechOutcome.NoSpeech => Strings.OverlayNoSpeech,
+                SpeechOutcome.NoSignal => Strings.OverlayNoSignal,
                 _ => null,
             };
             if (message == null)

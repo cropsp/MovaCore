@@ -100,24 +100,37 @@ Dictation (hold-to-talk) reuses the hook, the clipboard service and the paste:
 
 - **`Services/SpeechOrchestrator.cs`** (platform-neutral, tested) turns hotkey press/release into commands on one
   `Channel` loop, so the hook thread never blocks and their order holds: press → `IAudioRecorder.Start` and a model
-  preload; release → stop, discard short (< 0.3 s) or silent recordings (`AudioSamples.IsSilent`: Whisper invents
-  text for silence), pad to 1.25 s, `ISpeechRecognizer.TranscribeAsync` beside the loop, `TranscriptText.Clean`,
-  then **`TextPaster`** (snapshot, set, Ctrl+V, wait for the read, restore; it waits for the `ClipboardGate`
-  instead of dropping the text). It enforces a 2-minute limit (a release during a UAC prompt is never seen), frees
-  the model after 10 idle minutes and reports `StateChanged` (state, outcome, `SpeechError`) on a worker thread.
+  preload; release → 150 ms more recording (`TrailingAudio`), then stop, discard short (< 0.3 s) recordings and
+  those without a signal (peak < −60 dBFS: `NoSignal`), keep the speech found by `ISpeechDetector` (`NoSpeech` if
+  none; without a detector the energy threshold `AudioSamples.IsSilent` decides: Whisper invents text for silence),
+  pad to 1.25 s, `ISpeechRecognizer.TranscribeAsync` beside the loop, `TranscriptText.Clean` (also drops
+  hesitations and 3+ repeated words), then **`TextPaster`** (snapshot, set, Ctrl+V, wait for the read, restore; a
+  read before the paste, e.g. by a clipboard manager, hides the paste itself, so it then restores after a pause; it
+  waits for the `ClipboardGate` instead of dropping the text). `NoSpeech`/`NoSignal` are reported only after a hold
+  of ≥ 1 s. It keeps the microphone open for 30 s after a dictation (`KeepMicrophoneOpen`), loads the model when
+  configured and never frees it, enforces a 2-minute limit (a release during a UAC prompt is never seen) and reports
+  `StateChanged` (state, outcome, `SpeechError`) on a worker thread.
 - **`Services/WasapiAudioRecorder.cs`** (Windows-only) records through NAudio's `WasapiRecorder` in shared mode with
-  AutoConvertPcm, so the audio engine delivers 16 kHz mono float; microphones are stored by endpoint ID.
+  AutoConvertPcm, so the audio engine delivers 16 kHz mono float; microphones are stored by endpoint ID. While open
+  it keeps the last 0.5 s in a ring: a recording on an open microphone starts with 0.3 s from before the press, and
+  `CopyRecent` feeds the equalizer. `Start` reopens it if the device (or the Windows default) changed or capture died.
 - **`Services/WhisperSpeechRecognizer.cs`** (Windows-only) wraps Whisper.net. Whisper.net caches its native load
   result (even a failure) for the process, so the runtime is chosen and test-loaded here first and then forced
-  (`RuntimeOptions.ForcedRuntimeLibrary`): Vulkan if the GPU option is on and `vulkan-1.dll` loads, else the CPU,
-  and on x64 only after an AVX2/FMA/F16C check (ggml's CPU code dies with an illegal instruction without them).
+  (`RuntimeOptions.ForcedRuntimeLibrary`): Vulkan if the GPU option is on and `vulkan-1.dll` loads (with
+  `VK_LOADER_LAYERS_DISABLE=~implicit~`: overlay layers crash Vulkan apps), else the CPU, and on x64 only after an
+  AVX2/FMA/F16C check (ggml's CPU code dies with an illegal instruction without them). A model loaded on the GPU gets
+  one warm-up run (shader compilation). It is also the `ISpeechDetector`: whisper.cpp's Silero VAD with
+  `models\ggml-silero-v6.2.0.bin` next to the exe, which `eng/get-vad-model.ps1` puts into the publish output (CI and
+  `publish.ps1`; a plain `dotnet build` has none, so the energy threshold is used).
 - **`Services/ModelDownloader.cs`** is the only network code: it downloads a `SpeechModelCatalog` model from
   Hugging Face into `<file>.partial` (range requests resume it), follows redirects by hand to read the SHA-256 in
   `X-Linked-Etag`, checks size, hash (pinned in the catalog: whisper.cpp's SHA-1, or for q8_0 the SHA-256 recorded from Hugging Face)
   and the ggml magic (`SpeechModelFile`).
   `ModelDownloadManager` runs one download in the background; enabling dictation starts it (and startup resumes it).
 - `TrayApplicationContext` swaps the tray icon (red/amber dot) and drives `UI/RecordingOverlay.cs`, a click-through
-  window that never takes the focus (`WS_EX_NOACTIVATE`, `ShowWithoutActivation`). Errors the user can fix
+  window that never takes the focus (`WS_EX_NOACTIVATE`, `ShowWithoutActivation`): a grey pulse until the microphone
+  delivers, then a red dot and an equalizer (`SpectrumAnalyzer`, Handy's algorithm), an amber wave if transcribing
+  takes over 0.3 s, or a short message; it fades in and out. Errors the user can fix
   (`SpeechException`: no model, no microphone, unsupported CPU…) are logged as Info, not Error; never log what was
   said or the audio.
 

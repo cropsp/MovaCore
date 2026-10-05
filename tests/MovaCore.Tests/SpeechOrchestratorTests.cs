@@ -14,7 +14,7 @@ namespace MovaCore.Tests
         private readonly FakeSpeechRecognizer _recognizer = new();
         private readonly FakeClipboard _clipboard = new();
         private readonly FakeHotkeyService _hotkeys = new();
-        private readonly BlockingCollection<SpeechStateChangedEventArgs> _events = new();
+        private BlockingCollection<SpeechStateChangedEventArgs> _events = new();
         private SpeechOrchestrator _orchestrator;
 
         public SpeechOrchestratorTests()
@@ -30,27 +30,35 @@ namespace MovaCore.Tests
         }
 
         private SpeechOrchestrator Create(
-            TimeSpan? minRecording = null, TimeSpan? maxRecording = null, string? modelPath = "")
+            TimeSpan? minRecording = null, TimeSpan? maxRecording = null, string? modelPath = "", ISpeechDetector? detector = null,
+            TimeSpan? keepMicrophoneOpen = null, TimeSpan? trailingAudio = null, TimeSpan? noticeableHold = null)
         {
             var paster = new TextPaster(_hotkeys, _clipboard, new ClipboardGate())
             {
                 PasteTimeout = TimeSpan.FromMilliseconds(100),
                 RestoreDelay = TimeSpan.Zero,
             };
-            var orchestrator = new SpeechOrchestrator(_recorder, _recognizer, paster)
+            var orchestrator = new SpeechOrchestrator(_recorder, _recognizer, paster, detector)
             {
                 MinRecording = minRecording ?? TimeSpan.Zero,
                 MaxRecording = maxRecording ?? TimeSpan.FromMinutes(1),
+                KeepMicrophoneOpen = keepMicrophoneOpen ?? TimeSpan.FromHours(1),
+                TrailingAudio = trailingAudio ?? TimeSpan.Zero,
+                NoticeableHold = noticeableHold ?? TimeSpan.FromHours(1),
             };
             orchestrator.StateChanged += (_, e) => _events.Add(e);
             orchestrator.Configure(Settings(modelPath == "" ? _modelPath : modelPath));
             return orchestrator;
         }
 
-        private void Recreate(TimeSpan? minRecording = null, TimeSpan? maxRecording = null, string? modelPath = "")
+        private void Recreate(
+            TimeSpan? minRecording = null, TimeSpan? maxRecording = null, string? modelPath = "", ISpeechDetector? detector = null,
+            TimeSpan? keepMicrophoneOpen = null, TimeSpan? trailingAudio = null, TimeSpan? noticeableHold = null)
         {
             _orchestrator.Dispose();
-            _orchestrator = Create(minRecording, maxRecording, modelPath);
+            _events.Dispose();
+            _events = new BlockingCollection<SpeechStateChangedEventArgs>();
+            _orchestrator = Create(minRecording, maxRecording, modelPath, detector, keepMicrophoneOpen, trailingAudio, noticeableHold);
         }
 
         private static SpeechSettings Settings(string? modelPath) =>
@@ -390,13 +398,231 @@ namespace MovaCore.Tests
         }
 
         [Fact]
-        public void LevelIsReportedOnlyWhileRecording()
+        public void RecentAudioIsReportedOnlyWhileRecording()
         {
-            Assert.Equal(0, _orchestrator.CurrentLevel);
+            var buffer = new float[512];
+            Assert.Equal(0, _orchestrator.CopyRecentAudio(buffer));
             _orchestrator.OnHotkeyPressed();
             Assert.Equal(SpeechState.Recording, Next().State);
 
-            Assert.Equal(0.5f, _orchestrator.CurrentLevel);
+            Assert.Equal(512, _orchestrator.CopyRecentAudio(buffer));
+            Assert.Equal(0.25f, buffer[^1]);
+
+            _orchestrator.OnHotkeyReleased();
+            NextIdle();
+            Assert.Equal(0, _orchestrator.CopyRecentAudio(buffer));
+            Assert.Equal(0f, buffer[^1]);
+        }
+
+        // The next dictation starts at once on the microphone that is still open
+        [Fact]
+        public void Microphone_StaysOpenBetweenDictations()
+        {
+            Dictate();
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+            Assert.True(_recorder.IsOpen);
+
+            Dictate();
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+
+            Assert.Equal(1, _recorder.OpenCount);
+            Assert.Equal(0, _recorder.CloseCalls);
+        }
+
+        [Fact]
+        public async Task Microphone_ClosesAfterItIsIdle()
+        {
+            Recreate(keepMicrophoneOpen: TimeSpan.FromMilliseconds(100));
+
+            Dictate();
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+
+            await WaitUntil(() => !_recorder.IsOpen);
+            Assert.Equal(1, _recorder.CloseCalls);
+        }
+
+        [Fact]
+        public async Task Press_CancelsThePendingClose()
+        {
+            Recreate(keepMicrophoneOpen: TimeSpan.FromMilliseconds(300));
+            Dictate();
+            NextIdle();
+
+            _orchestrator.OnHotkeyPressed();
+            Assert.Equal(SpeechState.Recording, Next().State);
+            await Task.Delay(500);
+
+            Assert.True(_recorder.IsRecording);
+            Assert.Equal(0, _recorder.CloseCalls);
+            _orchestrator.OnHotkeyReleased();
+            NextIdle();
+            await WaitUntil(() => !_recorder.IsOpen);
+        }
+
+        [Fact]
+        public async Task Disabling_ClosesTheMicrophoneAtOnce()
+        {
+            Dictate();
+            NextIdle();
+
+            _orchestrator.Configure(SpeechSettings.Disabled);
+
+            await WaitUntil(() => !_recorder.IsOpen);
+        }
+
+        [Fact]
+        public void Dispose_ClosesTheMicrophone()
+        {
+            Dictate();
+            NextIdle();
+
+            _orchestrator.Dispose();
+
+            Assert.False(_recorder.IsOpen);
+        }
+
+        // The audio still on its way and the end of the last word are recorded after the release
+        [Fact]
+        public void Release_KeepsRecordingTheTrailingAudio()
+        {
+            Recreate(trailingAudio: TimeSpan.FromMilliseconds(150));
+            _orchestrator.OnHotkeyPressed();
+            Assert.Equal(SpeechState.Recording, Next().State);
+
+            long released = System.Diagnostics.Stopwatch.GetTimestamp();
+            _orchestrator.OnHotkeyReleased();
+
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+            Assert.True(System.Diagnostics.Stopwatch.GetElapsedTime(released, _recorder.StoppedAt) >= TimeSpan.FromMilliseconds(140));
+        }
+
+        [Fact]
+        public void PressDuringTheTrailingAudio_IsIgnoredWithItsRelease()
+        {
+            Recreate(trailingAudio: TimeSpan.FromMilliseconds(300));
+            _orchestrator.OnHotkeyPressed();
+            Assert.Equal(SpeechState.Recording, Next().State);
+            _orchestrator.OnHotkeyReleased();
+
+            Dictate();
+
+            Assert.Equal(SpeechState.Transcribing, Next().State);
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+            Assert.False(_events.TryTake(out _, 200));
+            Assert.Single(_recorder.StartedDevices);
+        }
+
+        [Fact]
+        public void DetectedSpeech_IsCutOutOfTheRecording()
+        {
+            var detector = new FakeSpeechDetector
+            {
+                Segments = new[]
+                {
+                    new SpeechSegment(TimeSpan.Zero, TimeSpan.FromSeconds(0.5)),
+                    new SpeechSegment(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2)),
+                },
+            };
+            Recreate(detector: detector);
+            _recorder.Recording = FakeAudioRecorder.Speech(3);
+
+            Dictate();
+
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+            Assert.Equal(24000, _recognizer.SampleCount);
+        }
+
+        [Fact]
+        public void NoSpeechDetected_AfterADeliberateHold_IsReported()
+        {
+            Recreate(detector: new FakeSpeechDetector { Segments = Array.Empty<SpeechSegment>() }, noticeableHold: TimeSpan.Zero);
+
+            Dictate();
+
+            Assert.Equal(SpeechOutcome.NoSpeech, NextIdle().Outcome);
+            Assert.Empty(_recognizer.Transcriptions);
+        }
+
+        [Fact]
+        public void NoSpeechDetected_AfterATap_IsDiscardedQuietly()
+        {
+            Recreate(detector: new FakeSpeechDetector { Segments = Array.Empty<SpeechSegment>() });
+
+            Dictate();
+
+            Assert.Equal(SpeechOutcome.Discarded, NextIdle().Outcome);
+            Assert.Empty(_recognizer.Transcriptions);
+        }
+
+        // A muted microphone or a wrong input: the user is told to check it, and no detector is needed for that
+        [Fact]
+        public void NoSignal_AfterADeliberateHold_IsReported()
+        {
+            var detector = new FakeSpeechDetector();
+            Recreate(detector: detector, noticeableHold: TimeSpan.Zero);
+            _recorder.Recording = Scale(FakeAudioRecorder.Speech(1), 0.002f); // peak -68 dBFS
+
+            Dictate();
+
+            Assert.Equal(SpeechOutcome.NoSignal, NextIdle().Outcome);
+            Assert.Equal(0, detector.Calls);
+            Assert.Empty(_recognizer.Transcriptions);
+        }
+
+        [Fact]
+        public void DigitalSilence_AfterADeliberateHold_IsReportedAsNoSignal()
+        {
+            Recreate(noticeableHold: TimeSpan.Zero);
+            _recorder.Recording = new float[16000];
+
+            Dictate();
+
+            Assert.Equal(SpeechOutcome.NoSignal, NextIdle().Outcome);
+        }
+
+        // Without a detector, quiet speech (an audio interface with little gain) is still transcribed
+        [Fact]
+        public void QuietSpeech_WithoutADetector_IsTranscribed()
+        {
+            _recorder.Recording = Scale(FakeAudioRecorder.Speech(1), 0.02f); // peak -48 dBFS
+
+            Dictate();
+
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+        }
+
+        [Fact]
+        public void DetectorNotInstalled_FallsBackToTheEnergyThreshold()
+        {
+            var detector = new FakeSpeechDetector { Segments = null };
+            Recreate(detector: detector);
+            _recorder.Recording = FakeAudioRecorder.Speech(2);
+
+            Dictate();
+
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+            Assert.Equal(32000, _recognizer.SampleCount); // whole
+            Assert.Equal(1, detector.Calls);
+        }
+
+        [Fact]
+        public void DetectorFailure_FallsBackToTheEnergyThresholdForGood()
+        {
+            var detector = new FakeSpeechDetector { Error = new InvalidOperationException("boom") };
+            Recreate(detector: detector);
+
+            Dictate();
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+            Dictate();
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+
+            Assert.Equal(1, detector.Calls);
+        }
+
+        private static float[] Scale(float[] samples, float factor)
+        {
+            for (int i = 0; i < samples.Length; i++) samples[i] *= factor;
+            return samples;
         }
     }
 }

@@ -17,10 +17,14 @@ namespace MovaCore.Services
     /// <summary>
     /// Whisper through Whisper.net (whisper.cpp). The native runtime ships in runtimes\win-{arch} (CPU) and
     /// runtimes\vulkan\win-x64 (GPU) next to the exe. Whisper.net loads a runtime once per process and caches a failure
-    /// for good, so the runtime is chosen here, before Whisper.net is touched, and forced.
+    /// for good, so the runtime is chosen here, before Whisper.net is touched, and forced. Voice activity detection
+    /// (whisper.cpp's Silero VAD, model in models\ next to the exe) lives here too, since it needs that same runtime.
     /// </summary>
-    public sealed partial class WhisperSpeechRecognizer : ISpeechRecognizer
+    public sealed partial class WhisperSpeechRecognizer : ISpeechRecognizer, ISpeechDetector
     {
+        /// <summary>The Silero VAD model, shipped in models\ next to the exe.</summary>
+        public const string VadModelFileName = "ggml-silero-v6.2.0.bin";
+
         private const ulong XSTATE_MASK_AVX = 1UL << 2;
 
         // Load order of a runtime folder: dependencies first, as Whisper.net does it
@@ -38,7 +42,12 @@ namespace MovaCore.Services
         private WhisperProcessor? _processor;
         private string? _loadedModel;
         private bool _loadedOnGpu;
+        private bool _warmedUp;
         private string? _language;
+        private WhisperVadFactory? _vadFactory;
+        private WhisperVadProcessor? _vad;
+
+        public static string VadModelPath { get; } = Path.Combine(AppContext.BaseDirectory, "models", VadModelFileName);
 
         public Task PreloadAsync(SpeechOptions options, CancellationToken cancellationToken) =>
             Task.Run(async () =>
@@ -46,7 +55,32 @@ namespace MovaCore.Services
                 await _lock.WaitAsync(cancellationToken);
                 try
                 {
-                    EnsureLoaded(options);
+                    WhisperProcessor processor = EnsureLoaded(options);
+                    if (!_warmedUp)
+                    {
+                        _warmedUp = true;
+                        await WarmUpAsync(processor, cancellationToken);
+                    }
+                }
+                finally
+                {
+                    _lock.Release();
+                }
+            }, cancellationToken);
+
+        public Task<IReadOnlyList<SpeechSegment>?> DetectSpeechAsync(float[] samples, SpeechOptions options, CancellationToken cancellationToken) =>
+            Task.Run(async () =>
+            {
+                if (!File.Exists(VadModelPath)) return null;
+
+                await _lock.WaitAsync(cancellationToken);
+                try
+                {
+                    WhisperVadProcessor vad = EnsureVadLoaded(options);
+                    var segments = new List<SpeechSegment>();
+                    foreach (VadSegmentData segment in vad.DetectSpeech(samples))
+                        segments.Add(new SpeechSegment(segment.Start, segment.End));
+                    return (IReadOnlyList<SpeechSegment>?)segments;
                 }
                 finally
                 {
@@ -82,6 +116,49 @@ namespace MovaCore.Services
         {
             RuntimeLibrary runtime = ChooseRuntime(useGpu);
             return $"{runtime}: {WhisperFactory.GetRuntimeInfo()?.Trim()}";
+        }
+
+        /// <summary>
+        /// The first run on a GPU compiles its shaders, which can take seconds: better while the app starts than on the
+        /// first dictation. On the CPU there is nothing to gain, and a run would only keep every core busy.
+        /// </summary>
+        private async Task WarmUpAsync(WhisperProcessor processor, CancellationToken cancellationToken)
+        {
+            if (!_loadedOnGpu) return;
+            long started = Stopwatch.GetTimestamp();
+            var silence = new float[AudioSamples.SampleRate * 5 / 4];
+            await processor.ProcessWithUtf8HandlerAsync(silence, _ => { }, cancellationToken);
+            AppLog.Info($"Speech model warmed up in {Stopwatch.GetElapsedTime(started).TotalSeconds:0.0} s");
+        }
+
+        // Settings close to Handy's (Silero with smoothing): a lenient threshold, since losing speech is worse than
+        // keeping a little silence, and padding that keeps the edges of words
+        private WhisperVadProcessor EnsureVadLoaded(SpeechOptions options)
+        {
+            if (_vad != null) return _vad;
+
+            ChooseRuntime(options.UseGpu); // before Whisper.net loads anything, see the class summary
+            long started = Stopwatch.GetTimestamp();
+            try
+            {
+                // On the CPU: the model is tiny, and a GPU round trip would cost more than it saves
+                _vadFactory = WhisperVadFactory.FromPath(VadModelPath, new WhisperFactoryOptions { UseGpu = false });
+                _vad = _vadFactory.CreateBuilder()
+                    .WithUseGpu(false)
+                    .WithThreads(Math.Clamp(Environment.ProcessorCount, 1, 4))
+                    .WithThreshold(0.3f)
+                    .WithMinSpeechDuration(TimeSpan.FromMilliseconds(100))
+                    .WithMinSilenceDuration(TimeSpan.FromMilliseconds(450))
+                    .WithSpeechPadding(TimeSpan.FromMilliseconds(450))
+                    .Build();
+            }
+            catch
+            {
+                FreeVad();
+                throw;
+            }
+            AppLog.Info($"Voice activity detection loaded in {Stopwatch.GetElapsedTime(started).TotalMilliseconds:0} ms");
+            return _vad;
         }
 
         private WhisperProcessor EnsureLoaded(SpeechOptions options)
@@ -146,6 +223,22 @@ namespace MovaCore.Services
             _processor = null;
             _factory = null;
             _loadedModel = null;
+            _warmedUp = false;
+        }
+
+        private void FreeVad()
+        {
+            try
+            {
+                _vad?.Dispose();
+                _vadFactory?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                AppLog.Error("Could not free the voice activity detector", ex);
+            }
+            _vad = null;
+            _vadFactory = null;
         }
 
         private static RuntimeLibrary ChooseRuntime(bool useGpu)
@@ -167,6 +260,10 @@ namespace MovaCore.Services
 
                 RuntimeLibrary runtime = RuntimeLibrary.Cpu;
                 string folder = cpuFolder;
+                // Implicit Vulkan layers (the overlays of OBS, Steam, RTSS and the like) load into every Vulkan process
+                // and have crashed speech recognition in other apps (Handy); a value the user set is kept
+                if (useGpu && Environment.GetEnvironmentVariable("VK_LOADER_LAYERS_DISABLE") == null)
+                    Environment.SetEnvironmentVariable("VK_LOADER_LAYERS_DISABLE", "~implicit~");
                 // Vulkan comes with the graphics driver (vulkan-1.dll). No fallback after trying it: a half-loaded runtime
                 // cannot be mixed with the other one's identically named DLLs.
                 if (useGpu && !arm64 && File.Exists(Path.Combine(vulkanFolder, "ggml-vulkan-whisper.dll"))
@@ -226,6 +323,7 @@ namespace MovaCore.Services
             // A transcription still running uses the model: freeing it underneath would crash
             if (!_lock.Wait(TimeSpan.FromSeconds(3))) return;
             Free();
+            FreeVad();
             _lock.Release();
         }
 

@@ -16,6 +16,9 @@ namespace MovaCore.Services
         private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(2);
         private const int KeyDelayMs = 25;
 
+        // Some applications miss a paste whose Ctrl is released sooner (seen by Handy on real machines)
+        private const int PasteHoldMs = 100;
+
         // Modifiers that may be physically held when we simulate a shortcut, with their Win32 virtual-key codes.
         // Ctrl is handled separately: our shortcuts press it first.
         private static readonly (KeyCode Key, int VirtualKey)[] HeldModifiers =
@@ -235,31 +238,32 @@ namespace MovaCore.Services
         public void SimulateCopy()
         {
             if (_copyPasteKeys == CopyPasteKeys.CtrlInsertShiftInsert)
-                SendShortcut(KeyCode.VcInsert, 1, KeyCode.VcLeftControl);
+                SendShortcut(KeyCode.VcInsert, 1, KeyDelayMs, KeyCode.VcLeftControl);
             else
-                SendShortcut(KeyCode.VcC, 1, KeyCode.VcLeftControl);
+                SendShortcut(KeyCode.VcC, 1, KeyDelayMs, KeyCode.VcLeftControl);
         }
 
         public void SimulatePaste()
         {
             if (_copyPasteKeys == CopyPasteKeys.CtrlInsertShiftInsert)
-                SendShortcut(KeyCode.VcInsert, 1, KeyCode.VcLeftShift);
+                SendShortcut(KeyCode.VcInsert, 1, PasteHoldMs, KeyCode.VcLeftShift);
             else
-                SendShortcut(KeyCode.VcV, 1, KeyCode.VcLeftControl);
+                SendShortcut(KeyCode.VcV, 1, PasteHoldMs, KeyCode.VcLeftControl);
         }
 
         public void SimulateSelectLeft(int caretSteps)
         {
-            if (caretSteps > 0) SendShortcut(KeyCode.VcLeft, caretSteps, KeyCode.VcLeftShift);
+            if (caretSteps > 0) SendShortcut(KeyCode.VcLeft, caretSteps, KeyDelayMs, KeyCode.VcLeftShift);
         }
 
         public void SimulateSelectWordLeft()
         {
-            SendShortcut(KeyCode.VcLeft, 1, KeyCode.VcLeftControl, KeyCode.VcLeftShift);
+            SendShortcut(KeyCode.VcLeft, 1, KeyDelayMs, KeyCode.VcLeftControl, KeyCode.VcLeftShift);
         }
 
-        // Presses `modifiers`, taps `key` `repeat` times and releases the modifiers, regardless of what the user holds
-        private void SendShortcut(KeyCode key, int repeat, params KeyCode[] modifiers)
+        // Presses `modifiers`, taps `key` `repeat` times and releases the modifiers `holdMs` later, regardless of what
+        // the user holds
+        private void SendShortcut(KeyCode key, int repeat, int holdMs, params KeyCode[] modifiers)
         {
             // Ctrl goes down first: it masks the release of a held Alt or Win below (no menu bar, no Start menu)
             _simulator.SimulateKeyPress(KeyCode.VcLeftControl);
@@ -281,7 +285,7 @@ namespace MovaCore.Services
                 _simulator.SimulateKeyPress(key);
                 _simulator.SimulateKeyRelease(key);
             }
-            Thread.Sleep(KeyDelayMs);
+            Thread.Sleep(holdMs);
 
             for (int i = modifiers.Length - 1; i >= 0; i--)
             {

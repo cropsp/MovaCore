@@ -34,8 +34,10 @@ $publishDir = "bin\$configuration\net10.0-windows\$runtime\publish"
 & "$PSScriptRoot\eng\copy-vc-runtime.ps1" -PublishDir $publishDir -Rid $runtime
 & "$PSScriptRoot\eng\check-native-deps.ps1" -PublishDir $publishDir
 if ($LASTEXITCODE -ne 0) { exit 1 }
+# The voice activity model that tells speech from silence
+& "$PSScriptRoot\eng\get-vad-model.ps1" -PublishDir $publishDir
 
 Write-Host "Native AOT Build completed successfully!"
 Write-Host "Output location: $publishDir\"
-Write-Host "Ship the whole folder: MovaCore.exe, uiohook.dll (the keyboard hook) and runtimes\ (speech recognition)."
+Write-Host "Ship the whole folder: MovaCore.exe, uiohook.dll (the keyboard hook), runtimes\ and models\ (speech recognition)."
 Write-Host "Native AOT cannot embed native libraries."

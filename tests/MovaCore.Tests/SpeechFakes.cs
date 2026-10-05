@@ -12,9 +12,14 @@ namespace MovaCore.Tests
 
         public Exception? StartError { get; set; }
         public List<string?> StartedDevices { get; } = new();
+        public int OpenCount { get; private set; }
         public int StopCalls { get; private set; }
+        public int CloseCalls { get; private set; }
+        public bool IsOpen { get; private set; }
         public bool IsRecording { get; private set; }
-        public float CurrentLevel => IsRecording ? 0.5f : 0;
+
+        /// <summary>When the last Stop happened.</summary>
+        public long StoppedAt { get; private set; }
 
         public IReadOnlyList<AudioInputDevice> GetInputDevices() => new[] { new AudioInputDevice("{mic-1}", "Microphone") };
 
@@ -22,14 +27,30 @@ namespace MovaCore.Tests
         {
             if (StartError != null) throw StartError;
             StartedDevices.Add(deviceId);
+            if (!IsOpen) OpenCount++;
+            IsOpen = true;
             IsRecording = true;
         }
 
         public float[] Stop()
         {
             StopCalls++;
+            StoppedAt = System.Diagnostics.Stopwatch.GetTimestamp();
             IsRecording = false;
             return (float[])Recording.Clone(); // the orchestrator clears the buffer it gets
+        }
+
+        public void Close()
+        {
+            CloseCalls++;
+            IsOpen = false;
+            IsRecording = false;
+        }
+
+        public int CopyRecent(Span<float> destination)
+        {
+            destination.Fill(0.25f);
+            return IsOpen ? destination.Length : 0;
         }
 
         public void Dispose() { }
@@ -73,6 +94,21 @@ namespace MovaCore.Tests
         }
 
         public void Dispose() { }
+    }
+
+    public class FakeSpeechDetector : ISpeechDetector
+    {
+        /// <summary>What detection returns; null means no detector is installed.</summary>
+        public IReadOnlyList<SpeechSegment>? Segments { get; set; } = new[] { new SpeechSegment(TimeSpan.Zero, TimeSpan.FromSeconds(10)) };
+
+        public Exception? Error { get; set; }
+        public int Calls { get; private set; }
+
+        public Task<IReadOnlyList<SpeechSegment>?> DetectSpeechAsync(float[] samples, SpeechOptions options, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Error != null ? Task.FromException<IReadOnlyList<SpeechSegment>?>(Error) : Task.FromResult(Segments);
+        }
     }
 
     /// <summary>Serves files over fake HTTP, with redirects, range requests and Hugging Face's X-Linked-* headers.</summary>

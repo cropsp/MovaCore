@@ -10,6 +10,16 @@ Whisper.net: .NET bindings for whisper.cpp
   Copyright (c) 2024 sandrohanea
   MIT License
 
+Silero VAD (models\ggml-silero-v6.2.0.bin, converted to ggml by the whisper.cpp project): voice activity detection
+  https://github.com/snakers4/silero-vad
+  Copyright (c) 2020-present Silero Team
+  MIT License
+
+Handy: the recording indicator's equalizer follows its algorithm and calibration
+  https://github.com/cjpais/Handy
+  Copyright (c) 2025 CJ Pais
+  MIT License
+
 NAudio: microphone recording (WASAPI)
   https://github.com/naudio/NAudio
   Copyright 2020 Mark Heath

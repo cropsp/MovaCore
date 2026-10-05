@@ -58,8 +58,8 @@ namespace MovaCore
             "Не вдалося завантажити модель розпізнавання: {0}. MovaCore продовжить завантаження наступного разу."), reason);
 
         // Dictation: shown in the recording indicator, or in a balloon when the indicator is off
-        public static string OverlayRecording => T("Recording", "Запис");
-        public static string OverlayTranscribing => T("Transcribing…", "Розпізнавання…");
+        public static string OverlayNoSpeech => T("No speech heard", "Голосу не чути");
+        public static string OverlayNoSignal => T("The microphone is silent — check it in Settings", "Мікрофон мовчить — перевірте його в налаштуваннях");
 
         public static string SpeechModelStillDownloading(int? percent) => percent is int p
             ? string.Format(T("The speech model is still downloading: {0}%", "Модель розпізнавання ще завантажується: {0}%"), p)

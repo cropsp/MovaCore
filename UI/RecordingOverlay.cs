@@ -1,25 +1,38 @@
 using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using MovaCore.Services;
 using Timer = System.Windows.Forms.Timer;
 
 namespace MovaCore.UI
 {
     /// <summary>
-    /// A small pill near the bottom of the screen that shows "Recording" with the microphone level, then
-    /// "Transcribing…", or a short message. It never takes the focus (the text must go to the window the user is
-    /// typing in) and lets clicks through.
+    /// A small pill near the bottom of the screen: while recording, a red dot and an equalizer of the voice (grey and
+    /// pulsing until the microphone delivers sound); while transcribing, if that takes a moment, an amber wave; or a
+    /// short message. It never takes the focus (the text must go to the window the user is typing in) and lets clicks
+    /// through. The look follows Handy's overlay.
     /// </summary>
     internal sealed partial class RecordingOverlay : Form
     {
         // Sizes in pixels at 96 DPI
-        private const int PillHeight = 40;
-        private const int PillWidth = 200;
+        private const int PillHeight = 36;
+        private const int PillWidth = 108;
         private const int MaxMessageWidth = 420;
         private const int BottomGap = 56;
-        private const int BarCount = 16;
+        private const int EdgePadding = 14;
+        private const int DotSize = 8;
+        private const int VisibleBars = 9; // the lower bands, where the voice is
+        private const float BarWidth = 4, BarGap = 3, MinBarHeight = 3, MaxBarHeight = 18, PulseBarHeight = 6;
+
+        private const double MaxOpacity = 0.92; // below 1 also keeps the window layered, which click-through needs
+        private const double FadeInMs = 120, FadeOutMs = 200;
+        private const double PulseMs = 900, PulseStaggerMs = 75;
+
+        /// <summary>A quick transcription shows no animation at all, only a slower one does.</summary>
+        private const double ProcessingDelayMs = 300;
 
         private const int WS_EX_TOPMOST = 0x00000008;
         private const int WS_EX_TRANSPARENT = 0x00000020;
@@ -33,21 +46,31 @@ namespace MovaCore.UI
         private static readonly Color Background = Color.FromArgb(32, 32, 32);
         private static readonly Color RecordingColor = Color.FromArgb(239, 68, 68);
         private static readonly Color TranscribingColor = Color.FromArgb(245, 158, 11);
+        private static readonly Color WaitingColor = Color.FromArgb(160, 160, 160);
+        private static readonly Color BarColor = Color.FromArgb(230, 255, 255, 255);
 
         private readonly Font _font = new("Segoe UI", 10F, FontStyle.Regular);
-        private readonly Func<float> _level;
-        private readonly float[] _levels = new float[BarCount]; // a short history, newest last
+        private readonly Func<float[], int> _recentAudio;
+        private readonly float[] _samples = new float[SpectrumAnalyzer.WindowSize];
+        private readonly SpectrumAnalyzer _spectrum = new();
         private readonly Timer _animation = new() { Interval = 33 };
         private readonly Timer _hideTimer = new();
         private Mode _mode = Mode.Hidden;
         private Rectangle _area;
         private string _text = "";
-        private int _frame;
+        private bool _live; // recording, and the microphone has delivered sound
+        private long _modeStarted;
+        private long _fadeStarted;
+        private double _fadeFrom;
+        private bool _fadingOut;
 
-        /// <param name="level">The microphone level from 0 to 1, read about 30 times a second while recording.</param>
-        public RecordingOverlay(Func<float> level)
+        /// <param name="recentAudio">
+        /// Fills the buffer with the latest audio and returns how much of it is real (0 until the microphone delivers);
+        /// called about 30 times a second while recording.
+        /// </param>
+        public RecordingOverlay(Func<float[], int> recentAudio)
         {
-            _level = level;
+            _recentAudio = recentAudio;
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
             FormBorderStyle = FormBorderStyle.None;
@@ -57,7 +80,7 @@ namespace MovaCore.UI
             ForeColor = Color.White;
             Font = _font;
             Size = new Size(PillWidth, PillHeight);
-            Opacity = 0.92; // also makes the window layered, which WS_EX_TRANSPARENT needs to let clicks through
+            Opacity = MaxOpacity;
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
 
             _animation.Tick += OnAnimationTick;
@@ -86,26 +109,33 @@ namespace MovaCore.UI
 
         public void ShowRecording()
         {
-            Array.Clear(_levels);
-            Present(Mode.Recording, Strings.OverlayRecording, hideAfter: null);
+            _live = false;
+            _spectrum.Reset();
+            Present(Mode.Recording, "", hideAfter: null);
         }
 
-        public void ShowTranscribing() => Present(Mode.Transcribing, Strings.OverlayTranscribing, hideAfter: null);
+        // The bars keep falling while it starts; the wave appears only if it takes a moment
+        public void ShowTranscribing() => Present(Mode.Transcribing, "", hideAfter: null);
 
         public void ShowMessage(string message) => Present(Mode.Message, message, hideAfter: TimeSpan.FromSeconds(3.5));
 
+        /// <summary>Fades out (still showing what it showed) and hides.</summary>
         public void HideOverlay()
         {
             _hideTimer.Stop();
-            _animation.Stop();
-            _mode = Mode.Hidden;
-            if (Visible) Hide();
+            if (!Visible)
+            {
+                _mode = Mode.Hidden;
+                return;
+            }
+            if (!_fadingOut) StartFade(fadeOut: true);
         }
 
         private void Present(Mode mode, string text, TimeSpan? hideAfter)
         {
             _mode = mode;
             _text = text;
+            _modeStarted = Stopwatch.GetTimestamp();
             _hideTimer.Stop();
             if (hideAfter is { } delay)
             {
@@ -119,15 +149,52 @@ namespace MovaCore.UI
             {
                 // Placed on the right monitor before it shows, so that WinForms scales it for that monitor's DPI
                 Location = new Point(_area.Left + _area.Width / 2, _area.Bottom - LogicalToDeviceUnits(BottomGap));
+                Opacity = 0.01; // not 0: a fully transparent layered window may not get painted before the fade
                 Show(); // without activation, see ShowWithoutActivation
                 SetWindowPos(Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
                 RoundCorners();
+                StartFade(fadeOut: false);
+            }
+            else if (_fadingOut)
+            {
+                StartFade(fadeOut: false); // shown again while it was fading out
             }
             Relayout();
 
-            if (mode == Mode.Message) _animation.Stop();
-            else _animation.Start();
+            _animation.Start();
             Invalidate();
+        }
+
+        private void StartFade(bool fadeOut)
+        {
+            _fadingOut = fadeOut;
+            _fadeFrom = Opacity;
+            _fadeStarted = Stopwatch.GetTimestamp();
+            _animation.Start();
+        }
+
+        // Called on every animation tick
+        private void UpdateFade()
+        {
+            double elapsed = Stopwatch.GetElapsedTime(_fadeStarted).TotalMilliseconds;
+            if (_fadingOut)
+            {
+                double progress = Math.Min(1, elapsed / FadeOutMs);
+                if (progress >= 1)
+                {
+                    _fadingOut = false;
+                    _mode = Mode.Hidden;
+                    _animation.Stop();
+                    Hide();
+                    return;
+                }
+                Opacity = Math.Max(0.01, _fadeFrom * (1 - progress));
+            }
+            else if (Opacity < MaxOpacity)
+            {
+                double progress = Math.Min(1, elapsed / FadeInMs);
+                Opacity = _fadeFrom + (MaxOpacity - _fadeFrom) * progress;
+            }
         }
 
         // Bottom center of the working area; a message gets as wide as its text needs
@@ -137,7 +204,7 @@ namespace MovaCore.UI
             if (_mode == Mode.Message)
             {
                 int textWidth = TextRenderer.MeasureText(_text, Font).Width + LogicalToDeviceUnits(48);
-                width = Math.Clamp(textWidth, width, LogicalToDeviceUnits(MaxMessageWidth));
+                width = Math.Clamp(textWidth, LogicalToDeviceUnits(200), LogicalToDeviceUnits(MaxMessageWidth));
             }
             int height = LogicalToDeviceUnits(PillHeight);
             Bounds = new Rectangle(
@@ -162,11 +229,23 @@ namespace MovaCore.UI
 
         private void OnAnimationTick(object? sender, EventArgs e)
         {
-            _frame++;
+            UpdateFade();
+            if (!Visible) return;
+            if (_mode == Mode.Message && !_fadingOut && Opacity >= MaxOpacity)
+            {
+                _animation.Stop(); // a message does not move
+                return;
+            }
+
             if (_mode == Mode.Recording)
             {
-                Array.Copy(_levels, 1, _levels, 0, BarCount - 1);
-                _levels[^1] = Math.Clamp(_level(), 0f, 1f);
+                int count = _recentAudio(_samples);
+                if (count > 0) _live = true;
+                if (_live) _spectrum.Update(_samples);
+            }
+            else
+            {
+                _spectrum.Update(ReadOnlySpan<float>.Empty); // the bars fall
             }
             Invalidate();
         }
@@ -177,44 +256,81 @@ namespace MovaCore.UI
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.Clear(Background);
 
-            int pad = LogicalToDeviceUnits(14);
-            int dot = LogicalToDeviceUnits(10);
-            int centerY = ClientSize.Height / 2;
-            var textFlags = TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis;
-
+            int pad = LogicalToDeviceUnits(EdgePadding);
             if (_mode == Mode.Message)
             {
+                var textFlags = TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis |
+                    TextFormatFlags.HorizontalCenter;
                 var bounds = new Rectangle(pad, 0, ClientSize.Width - 2 * pad, ClientSize.Height);
-                TextRenderer.DrawText(g, _text, Font, bounds, ForeColor, textFlags | TextFormatFlags.HorizontalCenter);
+                TextRenderer.DrawText(g, _text, Font, bounds, ForeColor, textFlags);
                 return;
             }
+            if (_mode == Mode.Hidden) return;
 
-            // A pulsing dot: red while recording, amber while transcribing
-            Color color = _mode == Mode.Recording ? RecordingColor : TranscribingColor;
-            int alpha = 160 + (int)(95 * (0.5 + 0.5 * Math.Sin(_frame / 5.0)));
-            using (var brush = new SolidBrush(Color.FromArgb(alpha, color)))
-                g.FillEllipse(brush, pad, centerY - dot / 2, dot, dot);
+            double now = Stopwatch.GetElapsedTime(_modeStarted).TotalMilliseconds;
+            bool processing = _mode == Mode.Transcribing && now >= ProcessingDelayMs;
+            bool waiting = _mode == Mode.Recording && !_live;
 
-            int textLeft = pad + dot + LogicalToDeviceUnits(8);
-            Size textSize = TextRenderer.MeasureText(_text, Font);
-            TextRenderer.DrawText(g, _text, Font, new Rectangle(textLeft, 0, textSize.Width, ClientSize.Height), ForeColor, textFlags);
-
-            if (_mode != Mode.Recording) return;
-
-            // The level of the last half second as bars, newest on the right
-            int barsLeft = textLeft + textSize.Width + LogicalToDeviceUnits(8);
-            int barsWidth = ClientSize.Width - pad - barsLeft;
-            if (barsWidth <= 0) return;
-            float step = barsWidth / (float)BarCount;
-            float barWidth = Math.Max(1f, step * 0.55f);
-            float maxHeight = ClientSize.Height * 0.55f;
-            using var barBrush = new SolidBrush(Color.FromArgb(220, 255, 255, 255));
-            for (int i = 0; i < BarCount; i++)
+            // The dot: grey until the microphone delivers, then red and breathing; amber while transcribing
+            float scale = DeviceDpi / 96f;
+            float dot = DotSize * scale;
+            float centerY = ClientSize.Height / 2f;
+            Color dotColor;
+            if (waiting)
             {
-                // Speech peaks around -30..-6 dBFS: a square root makes quiet speech visible
-                float height = Math.Max(LogicalToDeviceUnits(2), maxHeight * MathF.Sqrt(_levels[i]));
-                g.FillRectangle(barBrush, barsLeft + i * step, centerY - height / 2, barWidth, height);
+                dotColor = Color.FromArgb(115, WaitingColor);
             }
+            else
+            {
+                int alpha = 170 + (int)(85 * (0.5 + 0.5 * Math.Sin(now / 160.0)));
+                dotColor = Color.FromArgb(alpha, _mode == Mode.Recording ? RecordingColor : TranscribingColor);
+            }
+            using (var dotBrush = new SolidBrush(dotColor))
+                g.FillEllipse(dotBrush, pad, centerY - dot / 2, dot, dot);
+
+            // The bars, centred in the space right of the dot, growing up and down from the middle
+            float barWidth = BarWidth * scale, gap = BarGap * scale;
+            float barsWidth = VisibleBars * barWidth + (VisibleBars - 1) * gap;
+            float areaLeft = pad + dot;
+            float left = areaLeft + (ClientSize.Width - pad - areaLeft - barsWidth) / 2;
+            ReadOnlySpan<float> levels = _spectrum.Levels;
+            for (int i = 0; i < VisibleBars; i++)
+            {
+                float height;
+                Color color;
+                if (waiting || processing)
+                {
+                    // A wave from the outer bars to the middle: still waiting (grey), or working (amber)
+                    double delay = (VisibleBars / 2 - Math.Abs(i - VisibleBars / 2)) * PulseStaggerMs;
+                    double phase = ((now - delay) % PulseMs + PulseMs) % PulseMs / PulseMs;
+                    float swing = (float)(0.5 - 0.5 * Math.Cos(2 * Math.PI * phase));
+                    height = PulseBarHeight * (0.55f + 0.95f * swing);
+                    color = Color.FromArgb((int)(255 * (0.25f + 0.45f * swing)), waiting ? WaitingColor : TranscribingColor);
+                }
+                else
+                {
+                    height = Math.Clamp(MinBarHeight + MathF.Pow(levels[i], 0.7f) * (MaxBarHeight - MinBarHeight), MinBarHeight, MaxBarHeight);
+                    color = BarColor;
+                }
+                using var brush = new SolidBrush(color);
+                FillBar(g, brush, left + i * (barWidth + gap), centerY, barWidth, height * scale);
+            }
+        }
+
+        // A bar with fully rounded ends
+        private static void FillBar(Graphics g, Brush brush, float x, float centerY, float width, float height)
+        {
+            if (height <= width)
+            {
+                g.FillEllipse(brush, x, centerY - height / 2, width, height);
+                return;
+            }
+            float top = centerY - height / 2;
+            using var path = new GraphicsPath();
+            path.AddArc(x, top, width, width, 180, 180);
+            path.AddArc(x, top + height - width, width, width, 0, 180);
+            path.CloseFigure();
+            g.FillPath(brush, path);
         }
 
         protected override void Dispose(bool disposing)

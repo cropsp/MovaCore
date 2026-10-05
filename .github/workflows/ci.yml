@@ -70,6 +70,17 @@ jobs:
           ./eng/copy-vc-runtime.ps1 -PublishDir out/${{ matrix.rid }} -Rid ${{ matrix.rid }}
           ./eng/check-native-deps.ps1 -PublishDir out/${{ matrix.rid }}
 
+      # Silero voice activity model (under 1 MB), shipped in models\
+      - name: Cache the voice activity model
+        uses: actions/cache@v4
+        with:
+          path: vad-model
+          key: whisper-vad-${{ hashFiles('eng/get-vad-model.ps1') }}
+
+      - name: Add the voice activity model
+        shell: pwsh
+        run: ./eng/get-vad-model.ps1 -PublishDir out/${{ matrix.rid }} -CacheDir vad-model
+
       - name: Report output size
         shell: pwsh
         run: |
@@ -157,7 +168,8 @@ jobs:
         shell: pwsh
         run: |
           $arch = '${{ matrix.rid }}'.Substring(4)
-          $required = @('MovaCore.exe', 'uiohook.dll', "runtimes/win-$arch/whisper.dll", "runtimes/win-$arch/msvcp140.dll")
+          $required = @('MovaCore.exe', 'uiohook.dll', "runtimes/win-$arch/whisper.dll", "runtimes/win-$arch/msvcp140.dll",
+            'models/ggml-silero-v6.2.0.bin')
           if ($arch -eq 'x64') { $required += @('runtimes/vulkan/win-x64/ggml-vulkan-whisper.dll', 'runtimes/vulkan/win-x64/msvcp140.dll') }
           $missing = $required | Where-Object { -not (Test-Path "out/${{ matrix.rid }}/$_") }
           if ($missing) { throw "Missing from the publish output: $($missing -join ', ')" }
@@ -169,6 +181,7 @@ jobs:
             out/${{ matrix.rid }}/MovaCore.exe
             out/${{ matrix.rid }}/uiohook.dll
             out/${{ matrix.rid }}/runtimes/
+            out/${{ matrix.rid }}/models/
           if-no-files-found: error
 
   release:
@@ -203,7 +216,7 @@ jobs:
           ### Installation
           Download \`MovaCore-$GITHUB_REF_NAME-win-x64.zip\` (or \`win-arm64\` for ARM devices), extract the whole
           archive into one folder and run \`MovaCore.exe\`. Keep the other files next to it: \`uiohook.dll\` is the
-          native keyboard hook and the \`runtimes\` folder holds speech recognition. Checksums are in
+          native keyboard hook, and the \`runtimes\` and \`models\` folders hold speech recognition. Checksums are in
           \`SHA256SUMS.txt\`.
           EOF
           cat release-notes.md

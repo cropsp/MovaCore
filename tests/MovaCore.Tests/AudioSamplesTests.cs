@@ -1,3 +1,4 @@
+using MovaCore.Models;
 using MovaCore.Services;
 using Xunit;
 
@@ -93,6 +94,55 @@ namespace MovaCore.Tests
             float[] samples = FakeAudioRecorder.Speech(2);
 
             Assert.Same(samples, AudioSamples.PadToMinimum(samples, TimeSpan.FromSeconds(1.25)));
+        }
+
+        // A quiet microphone (speech around -50 dBFS) is speech for the fallback threshold
+        [Fact]
+        public void QuietSpeech_IsNotSilent()
+        {
+            float[] samples = FakeAudioRecorder.Speech(0.5);
+            for (int i = 0; i < samples.Length; i++) samples[i] *= 0.015f; // peak 0.003, -50 dBFS
+
+            Assert.False(AudioSamples.IsSilent(samples));
+        }
+
+        [Fact]
+        public void KeepSegments_JoinsTheSpeech()
+        {
+            float[] samples = Enumerable.Range(0, 32000).Select(i => (float)i).ToArray();
+            var segments = new[]
+            {
+                new SpeechSegment(TimeSpan.FromSeconds(0.5), TimeSpan.FromSeconds(1)),
+                new SpeechSegment(TimeSpan.FromSeconds(1.5), TimeSpan.FromSeconds(1.75)),
+            };
+
+            float[] kept = AudioSamples.KeepSegments(samples, segments);
+
+            Assert.Equal(8000 + 4000, kept.Length);
+            Assert.Equal(8000f, kept[0]);
+            Assert.Equal(15999f, kept[7999]);
+            Assert.Equal(24000f, kept[8000]);
+            Assert.Equal(27999f, kept[^1]);
+        }
+
+        [Fact]
+        public void KeepSegments_MergesOverlapsAndClampsToTheRecording()
+        {
+            var samples = new float[16000];
+            var segments = new[]
+            {
+                new SpeechSegment(TimeSpan.FromSeconds(0.5), TimeSpan.FromSeconds(2)), // past the end
+                new SpeechSegment(TimeSpan.FromSeconds(-0.1), TimeSpan.FromSeconds(0.25)), // before the start, out of order
+                new SpeechSegment(TimeSpan.FromSeconds(0.2), TimeSpan.FromSeconds(0.6)), // overlaps both
+            };
+
+            Assert.Same(samples, AudioSamples.KeepSegments(samples, segments));
+        }
+
+        [Fact]
+        public void KeepSegments_WithoutSegments_KeepsNothing()
+        {
+            Assert.Empty(AudioSamples.KeepSegments(new float[16000], Array.Empty<SpeechSegment>()));
         }
     }
 }

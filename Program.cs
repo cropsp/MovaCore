@@ -74,7 +74,7 @@ namespace MovaCore
             var orchestrator = new HotkeyOrchestrator(hotkeys, converter, clipboard, layouts, clipboardGate);
             using var recorder = new WasapiAudioRecorder();
             using var recognizer = new WhisperSpeechRecognizer();
-            using var speech = new SpeechOrchestrator(recorder, recognizer, new TextPaster(hotkeys, clipboard, clipboardGate));
+            using var speech = new SpeechOrchestrator(recorder, recognizer, new TextPaster(hotkeys, clipboard, clipboardGate), recognizer);
             using var downloader = new ModelDownloader();
             using var downloads = new ModelDownloadManager(downloader, SpeechModelCatalog.DefaultModelsDirectory);
             var settings = new SettingsService(new StartupRegistration());
