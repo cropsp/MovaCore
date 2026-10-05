@@ -114,7 +114,7 @@ namespace MovaCore.Services
         [LibraryImport("user32.dll")]
         private static unsafe partial uint GetRawInputData(IntPtr rawInput, uint command, byte* data, ref uint size, uint headerSize);
 
-        [LibraryImport("user32.dll", SetLastError = true)]
+        [LibraryImport("user32.dll", EntryPoint = "PostMessageW", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static partial bool PostMessage(IntPtr hWnd, int msg, nint wParam, IntPtr lParam);
     }
