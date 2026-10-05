@@ -192,6 +192,23 @@ namespace MovaCore.Tests
             Assert.Equal(1, _hotkeys.PasteCalls);
         }
 
+        // A dictation paste holds the same gate: a conversion meanwhile is dropped, not interleaved with it
+        [Fact]
+        public async Task SharedGateTaken_ConversionIsIgnored()
+        {
+            var gate = new ClipboardGate();
+            var orchestrator = new HotkeyOrchestrator(_hotkeys, new LayoutConverterService(), _clipboard, _layouts, gate);
+            _hotkeys.OnCopy = () => _clipboard.SimulateAppCopy("ghbdsn");
+            Assert.True(gate.TryEnter());
+
+            await orchestrator.ExecuteConversionAsync();
+
+            Assert.Equal(0, _hotkeys.CopyCalls);
+            gate.Exit();
+            await orchestrator.ExecuteConversionAsync();
+            Assert.Equal(1, _hotkeys.CopyCalls);
+        }
+
         [Fact]
         public async Task CanRunAgainAfterCompletion()
         {

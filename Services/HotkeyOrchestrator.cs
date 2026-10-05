@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using System.Globalization;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace MovaCore.Services
@@ -15,9 +14,8 @@ namespace MovaCore.Services
         private readonly ILayoutConverterService _converterService;
         private readonly IClipboardService _clipboardService;
         private readonly IKeyboardLayoutSwitcher _layoutSwitcher;
+        private readonly ClipboardGate _clipboardGate;
 
-        // 0 = idle, 1 = busy. Interlocked because every hotkey press starts on its own thread-pool thread.
-        private int _isProcessing;
         private volatile bool _restoreClipboard = true;
         private volatile bool _switchLayout = true;
         private volatile bool _selectConvertedText = true;
@@ -66,17 +64,21 @@ namespace MovaCore.Services
             IHotkeyService hotkeyService,
             ILayoutConverterService converterService,
             IClipboardService clipboardService,
-            IKeyboardLayoutSwitcher layoutSwitcher)
+            IKeyboardLayoutSwitcher layoutSwitcher,
+            ClipboardGate? clipboardGate = null)
         {
             _hotkeyService = hotkeyService;
             _converterService = converterService;
             _clipboardService = clipboardService;
             _layoutSwitcher = layoutSwitcher;
+            _clipboardGate = clipboardGate ?? new ClipboardGate();
         }
 
         public async Task ExecuteConversionAsync()
         {
-            if (Interlocked.CompareExchange(ref _isProcessing, 1, 0) != 0) return;
+            // Every hotkey press starts on its own thread-pool thread; a press during a conversion (or a dictation
+            // paste) is dropped
+            if (!_clipboardGate.TryEnter()) return;
 
             try
             {
@@ -144,7 +146,7 @@ namespace MovaCore.Services
             }
             finally
             {
-                Volatile.Write(ref _isProcessing, 0);
+                _clipboardGate.Exit();
             }
         }
 

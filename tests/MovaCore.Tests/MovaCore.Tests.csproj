@@ -27,6 +27,9 @@
     <Compile Include="../../Models/UiLanguage.cs" Link="Linked/UiLanguage.cs" />
     <Compile Include="../../Models/KeyboardLanguage.cs" Link="Linked/KeyboardLanguage.cs" />
     <Compile Include="../../Services/HotkeyMatching.cs" Link="Linked/HotkeyMatching.cs" />
+    <Compile Include="../../Services/HotkeyAction.cs" Link="Linked/HotkeyAction.cs" />
+    <Compile Include="../../Services/HotkeyStateTracker.cs" Link="Linked/HotkeyStateTracker.cs" />
+    <Compile Include="../../Services/ClipboardGate.cs" Link="Linked/ClipboardGate.cs" />
     <Compile Include="../../Services/ProcessNames.cs" Link="Linked/ProcessNames.cs" />
     <Compile Include="../../Services/LayoutTableBuilder.cs" Link="Linked/LayoutTableBuilder.cs" />
     <Compile Include="../../Services/IKeyboardLayoutSwitcher.cs" Link="Linked/IKeyboardLayoutSwitcher.cs" />
