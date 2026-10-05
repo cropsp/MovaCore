@@ -5,8 +5,8 @@ Puts whisper.cpp's Silero voice activity model into models\ of a publish output,
 .DESCRIPTION
 The model (under 1 MB, MIT licensed, converted to ggml by the whisper.cpp project) decides which part of a dictation
 is speech. It ships with the app instead of being downloaded at runtime, so dictation works offline from the start. A
-copy in -CacheDir is reused. The download is checked against the SHA-256 pinned below; while none is pinned, against
-the one Hugging Face reports for the file, and the hash is printed so that it can be pinned.
+copy in -CacheDir is reused. The download is checked against the SHA-256 pinned below (after a version change, empty it:
+the one Hugging Face reports is then used, and printed so that it can be pinned again).
 
 .EXAMPLE
 ./eng/get-vad-model.ps1 -PublishDir out/win-x64 -CacheDir vad-model
@@ -21,7 +21,7 @@ $ProgressPreference = 'SilentlyContinue' # Invoke-WebRequest is many times slowe
 # Keep in step with WhisperSpeechRecognizer.VadModelFileName
 $fileName = 'ggml-silero-v6.2.0.bin'
 $repository = 'ggml-org/whisper-vad'
-$pinnedSha256 = ''
+$pinnedSha256 = '2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987'
 
 function Get-Sha256([string] $path) { (Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() }
 
