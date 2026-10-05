@@ -234,11 +234,17 @@ namespace MovaCore
             if (SameImage(waiting, speaking)) AppLog.Error("Smoke test: the recording indicator did not react to sound");
 
             overlay.ShowTranscribing();
-            await Task.Delay(450); // the wave appears after a delay
+            await Task.Delay(450); // the mouse gnaws its wheat after a delay
             Render(overlay).Dispose();
-            overlay.ShowMessage(Strings.OverlayNoSignal);
-            await Task.Delay(200);
+            overlay.ShowPasted();
+            await Task.Delay(150);
             Render(overlay).Dispose();
+            foreach (MouseScene.Pose pose in new[] { MouseScene.Pose.Puzzled, MouseScene.Pose.Straining, MouseScene.Pose.Calm })
+            {
+                overlay.ShowMessage(Strings.OverlayNoSignal, pose);
+                await Task.Delay(150);
+                Render(overlay).Dispose();
+            }
             if (GetForegroundWindow() != foregroundBefore) AppLog.Error("Smoke test: the recording indicator took the focus");
 
             overlay.HideOverlay();

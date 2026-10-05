@@ -133,9 +133,11 @@ Dictation (hold-to-talk) reuses the hook, the clipboard service and the paste:
   `ModelDownloadManager` runs one download in the background; enabling dictation starts it (and startup resumes it),
   except for a model the user deleted (`Delete`, the Voice tab's button) in this session.
 - `TrayApplicationContext` swaps the tray icon (red/amber dot) and drives `UI/RecordingOverlay.cs`, a click-through
-  window that never takes the focus (`WS_EX_NOACTIVATE`, `ShowWithoutActivation`): a grey pulse until the microphone
-  delivers, then a red dot and an equalizer (`SpectrumAnalyzer`, Handy's algorithm), an amber wave if transcribing
-  takes over 0.3 s, or a short message; it fades in and out. Errors the user can fix
+  window that never takes the focus (`WS_EX_NOACTIVATE`, `ShowWithoutActivation`). It draws `UI/MouseScene.cs`: the
+  logo's field mouse in grass whose tufts are the equalizer (`SpectrumAnalyzer`, Handy's algorithm), grey with the
+  mouse dozing until the microphone delivers, the mouse gnawing wheat if transcribing takes over 0.3 s, a wink when
+  pasted, or the mouse's head beside a short message; it fades in and out. The scene was designed as a browser mockup
+  first; keep its proportions (152 x 44 logical pixels) when changing it. Errors the user can fix
   (`SpeechException`: no model, no microphone, unsupported CPU…) are logged as Info, not Error; never log what was
   said or the audio.
 

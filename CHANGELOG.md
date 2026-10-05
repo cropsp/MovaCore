@@ -13,8 +13,9 @@ All notable changes to MovaCore are documented here. The format follows
   smaller variant can be chosen, or a whisper.cpp model file of your own) in the background, checks it against its
   hash and resumes an interrupted download at the next start. This is the only network connection MovaCore makes.
 - While dictating, the tray icon shows a red dot (amber while recognizing), and a small indicator at the bottom of the
-  screen shows an equalizer of your voice without taking the focus. It pulses grey until the microphone is ready, and
-  shows an amber wave if recognition takes a moment.
+  screen shows the field mouse from the logo sitting in grass that grows with your voice, without taking the focus.
+  The mouse dozes until the microphone is ready, gnaws an ear of wheat if recognition takes a moment, and winks when
+  the text is pasted.
 - Voice activity detection (Silero VAD, shipped in a `models` folder) decides what is speech: quiet microphones work,
   silence is not sent to Whisper (which would invent phrases), and pauses are cut out. After a deliberate hold, the
   indicator says when no speech was heard or the microphone delivered no signal.

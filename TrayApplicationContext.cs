@@ -233,11 +233,19 @@ namespace MovaCore
             };
             if (message == null)
             {
-                _overlay.HideOverlay();
+                if (overlay && e.Outcome == SpeechOutcome.Pasted)
+                    _overlay.ShowPasted();
+                else
+                    _overlay.HideOverlay();
             }
             else if (overlay)
             {
-                _overlay.ShowMessage(message);
+                _overlay.ShowMessage(message, e.Outcome switch
+                {
+                    SpeechOutcome.NoSpeech => MouseScene.Pose.Puzzled,
+                    SpeechOutcome.NoSignal => MouseScene.Pose.Straining,
+                    _ => MouseScene.Pose.Calm,
+                });
             }
             else
             {

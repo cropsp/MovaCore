@@ -40,7 +40,7 @@ It also types what you say: hold a key, speak, and the text appears where you ar
 ### Voice input
 1. In **Settings → Voice**, turn on voice input and press **Save**. MovaCore downloads the speech model in the background (Whisper Large v3 Turbo q8_0, 874 MB, from [whisper.cpp's repository on Hugging Face](https://huggingface.co/ggerganov/whisper.cpp)); the tray icon's tooltip shows the progress. An interrupted download continues at the next start.
 2. **Hold ScrollLock** (default; change it in Settings), speak, and release it. The recognized text is pasted where the cursor is, and your clipboard is put back.
-3. While you speak, the tray icon shows a red dot and a small indicator at the bottom of the screen shows an equalizer of your voice. If its bars pulse grey, the microphone is still starting: wait until they move. If it says no speech was heard, check the microphone chosen in Settings → Voice and its input level in the Windows sound settings.
+3. While you speak, the tray icon shows a red dot, and a small indicator at the bottom of the screen shows a field mouse in grass that grows with your voice. If the grass is grey and the mouse dozes, the microphone is still starting: wait until the grass turns green. If it says no speech was heard, check the microphone chosen in Settings → Voice and its input level in the Windows sound settings.
 
 On the Voice tab you can also pick the full-precision model (1.6 GB) or a smaller one (574 MB) for slower computers, or your own whisper.cpp model file (`ggml-*.bin`; GGUF files are not supported), the speech language (automatic detection, Ukrainian, English and more) and the microphone. A downloaded model can be deleted there to free disk space.
 
