@@ -60,6 +60,9 @@ namespace MovaCore.Services
         /// <summary>Pause after the paste is read, for apps that read the clipboard twice or insert slowly.</summary>
         internal TimeSpan RestoreDelay { get; init; } = TimeSpan.FromMilliseconds(250);
 
+        /// <summary>Pause after Ctrl+V when the converted text was read before it (see <see cref="TextPaster"/>).</summary>
+        internal TimeSpan UnobservedPasteDelay { get; init; } = TimeSpan.FromMilliseconds(600);
+
         public HotkeyOrchestrator(
             IHotkeyService hotkeyService,
             ILayoutConverterService converterService,
@@ -107,6 +110,7 @@ namespace MovaCore.Services
                 }
 
                 // 3. Paste the converted text over the selection
+                long setStarted = Stopwatch.GetTimestamp();
                 if (!await _clipboardService.TrySetTextAsync(converted))
                 {
                     AppLog.Error("Could not put the converted text on the clipboard");
@@ -116,6 +120,9 @@ namespace MovaCore.Services
                 }
 
                 await Task.Delay(50);
+                // Delayed rendering reports only the first read: once something (a clipboard manager) has read the
+                // text, the paste itself cannot be seen
+                bool readEarly = await _clipboardService.WaitForTextReadAsync(setStarted, TimeSpan.Zero);
                 long pasteStarted = Stopwatch.GetTimestamp();
                 _hotkeyService.SimulatePaste();
 
@@ -123,12 +130,19 @@ namespace MovaCore.Services
 
                 // 4. Everything else waits until the app has actually read the converted text. Restoring earlier would
                 //    make it paste the old clipboard content instead; if it never reads it, the converted text stays.
-                if (!await _clipboardService.WaitForTextReadAsync(pasteStarted, PasteTimeout))
+                if (readEarly)
+                {
+                    await Task.Delay(UnobservedPasteDelay);
+                }
+                else if (!await _clipboardService.WaitForTextReadAsync(pasteStarted, PasteTimeout))
                 {
                     AppLog.Info("The converted text was not pasted in time; the clipboard keeps it");
                     return;
                 }
-                await Task.Delay(RestoreDelay);
+                else
+                {
+                    await Task.Delay(RestoreDelay);
+                }
 
                 if (SelectConvertedText && TryCountCaretSteps(converted, out int steps))
                     _hotkeyService.SimulateSelectLeft(steps);

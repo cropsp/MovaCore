@@ -56,7 +56,6 @@ namespace MovaCore.Tests
         public List<SpeechOptions> Preloads { get; } = new();
         public List<SpeechOptions> Transcriptions { get; } = new();
         public int SampleCount { get; private set; }
-        public int UnloadCalls { get; private set; }
 
         public Task PreloadAsync(SpeechOptions options, CancellationToken cancellationToken)
         {
@@ -72,8 +71,6 @@ namespace MovaCore.Tests
             if (Error != null) throw Error;
             return Segments;
         }
-
-        public void Unload() => UnloadCalls++;
 
         public void Dispose() { }
     }

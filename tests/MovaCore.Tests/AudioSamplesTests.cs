@@ -21,6 +21,16 @@ namespace MovaCore.Tests
             Assert.Equal(0f, AudioSamples.Rms(ReadOnlySpan<float>.Empty));
         }
 
+        [Theory]
+        [InlineData(1f, 0)]
+        [InlineData(0.1f, -20)]
+        [InlineData(0.01f, -40)]
+        [InlineData(0f, -100)]
+        public void ToDecibels_IsRelativeToFullScale(float level, double expected)
+        {
+            Assert.Equal(expected, AudioSamples.ToDecibels(level), 3);
+        }
+
         [Fact]
         public void Zeros_AreAllZeroAndSilent()
         {

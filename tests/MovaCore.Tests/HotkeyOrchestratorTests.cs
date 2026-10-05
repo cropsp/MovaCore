@@ -21,7 +21,8 @@ namespace MovaCore.Tests
             {
                 CopyTimeout = TimeSpan.FromMilliseconds(200),
                 PasteTimeout = TimeSpan.FromMilliseconds(200),
-                RestoreDelay = TimeSpan.Zero
+                RestoreDelay = TimeSpan.Zero,
+                UnobservedPasteDelay = TimeSpan.Zero,
             };
             _orchestrator.ConversionFailed += (_, message) => _messages.Add(message);
         }
@@ -48,6 +49,23 @@ namespace MovaCore.Tests
             Assert.Equal("привіт", _clipboard.LastSetText);
             Assert.Equal(1, _hotkeys.PasteCalls);
             Assert.Equal("user clipboard", _clipboard.Text);
+        }
+
+        // A clipboard manager read the converted text as soon as it was set: the paste cannot be seen, but the
+        // clipboard is still restored (after a pause)
+        [Fact]
+        public async Task TextReadBeforeThePaste_ClipboardIsStillRestored()
+        {
+            _clipboard.SimulateAppCopy("user clipboard");
+            _clipboard.ReadOnSet = true;
+            _hotkeys.OnCopy = () => _clipboard.SimulateAppCopy("ghbdsn");
+
+            await _orchestrator.ExecuteConversionAsync();
+
+            Assert.Equal("привіт", _clipboard.LastSetText);
+            Assert.Equal(1, _hotkeys.PasteCalls);
+            Assert.Equal("user clipboard", _clipboard.Text);
+            Assert.Equal(KeyboardLanguage.Ukrainian, Assert.Single(_layouts.Switches));
         }
 
         // Restoring before the app has read the converted text would make it paste the old clipboard content instead

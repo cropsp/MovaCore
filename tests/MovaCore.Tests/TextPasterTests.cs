@@ -17,6 +17,7 @@ namespace MovaCore.Tests
                 GateTimeout = TimeSpan.FromMilliseconds(100),
                 PasteTimeout = TimeSpan.FromMilliseconds(100),
                 RestoreDelay = TimeSpan.Zero,
+                UnobservedPasteDelay = TimeSpan.Zero,
             };
         }
 
@@ -44,6 +45,21 @@ namespace MovaCore.Tests
             Assert.Equal(PasteResult.NotObserved, result);
             Assert.Equal("Привіт", _clipboard.Text);
             Assert.Equal(0, _clipboard.RestoreCalls);
+        }
+
+        // A clipboard manager read the text as soon as it was set, so the paste itself cannot be seen: it counts as
+        // pasted and the clipboard is restored after a pause (before, the dictated text was left on the clipboard)
+        [Fact]
+        public async Task TextReadBeforeThePaste_IsRestoredAfterAPause()
+        {
+            _clipboard.SimulateAppCopy("user clipboard");
+            _clipboard.ReadOnSet = true;
+
+            PasteResult result = await _paster.PasteAsync("Привіт", restoreClipboard: true);
+
+            Assert.Equal(PasteResult.Pasted, result);
+            Assert.Equal(1, _hotkeys.PasteCalls);
+            Assert.Equal("user clipboard", _clipboard.Text);
         }
 
         [Fact]
@@ -82,9 +98,15 @@ namespace MovaCore.Tests
         [Fact]
         public async Task Paste_WaitsForAConversionToFinish()
         {
+            var paster = new TextPaster(_hotkeys, _clipboard, _gate)
+            {
+                GateTimeout = TimeSpan.FromSeconds(5), // generous: the test machine may be busy
+                PasteTimeout = TimeSpan.FromMilliseconds(100),
+                RestoreDelay = TimeSpan.Zero,
+            };
             Assert.True(_gate.TryEnter());
 
-            Task<PasteResult> paste = _paster.PasteAsync("Привіт", restoreClipboard: true);
+            Task<PasteResult> paste = paster.PasteAsync("Привіт", restoreClipboard: true);
             await Task.Delay(20);
             Assert.Equal(0, _clipboard.SetCalls);
             _gate.Exit();

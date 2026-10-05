@@ -17,8 +17,5 @@ namespace MovaCore.Services
 
         /// <summary>Transcribes 16 kHz mono samples and returns the recognized segments.</summary>
         Task<IReadOnlyList<string>> TranscribeAsync(float[] samples, SpeechOptions options, CancellationToken cancellationToken);
-
-        /// <summary>Frees the model (it takes hundreds of megabytes); the next call loads it again.</summary>
-        void Unload();
     }
 }

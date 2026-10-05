@@ -30,7 +30,7 @@ namespace MovaCore.Tests
         }
 
         private SpeechOrchestrator Create(
-            TimeSpan? minRecording = null, TimeSpan? maxRecording = null, TimeSpan? idleUnload = null, string? modelPath = "")
+            TimeSpan? minRecording = null, TimeSpan? maxRecording = null, string? modelPath = "")
         {
             var paster = new TextPaster(_hotkeys, _clipboard, new ClipboardGate())
             {
@@ -41,18 +41,16 @@ namespace MovaCore.Tests
             {
                 MinRecording = minRecording ?? TimeSpan.Zero,
                 MaxRecording = maxRecording ?? TimeSpan.FromMinutes(1),
-                IdleUnload = idleUnload ?? TimeSpan.FromMinutes(1),
             };
             orchestrator.StateChanged += (_, e) => _events.Add(e);
             orchestrator.Configure(Settings(modelPath == "" ? _modelPath : modelPath));
             return orchestrator;
         }
 
-        private void Recreate(TimeSpan? minRecording = null, TimeSpan? maxRecording = null, TimeSpan? idleUnload = null,
-            string? modelPath = "")
+        private void Recreate(TimeSpan? minRecording = null, TimeSpan? maxRecording = null, string? modelPath = "")
         {
             _orchestrator.Dispose();
-            _orchestrator = Create(minRecording, maxRecording, idleUnload, modelPath);
+            _orchestrator = Create(minRecording, maxRecording, modelPath);
         }
 
         private static SpeechSettings Settings(string? modelPath) =>
@@ -94,7 +92,8 @@ namespace MovaCore.Tests
             Assert.Equal(1, _hotkeys.PasteCalls);
             Assert.Equal(new string?[] { "{mic-1}" }, _recorder.StartedDevices);
             var expected = new SpeechOptions(_modelPath, "uk", false);
-            Assert.Equal(expected, Assert.Single(_recognizer.Preloads));
+            Assert.NotEmpty(_recognizer.Preloads); // ahead of time (Configure) and again on the press
+            Assert.All(_recognizer.Preloads, options => Assert.Equal(expected, options));
             Assert.Equal(expected, Assert.Single(_recognizer.Transcriptions));
         }
 
@@ -330,16 +329,64 @@ namespace MovaCore.Tests
             Assert.False(_recorder.IsRecording);
         }
 
+        // The model is loaded as soon as dictation is configured, so the first dictation does not wait for it
         [Fact]
-        public async Task IdleModel_IsUnloaded()
+        public async Task Configure_LoadsTheModelAheadOfTime()
         {
-            Recreate(idleUnload: TimeSpan.FromMilliseconds(100));
+            await WaitUntil(() => _recognizer.Preloads.Count > 0);
 
-            Dictate();
-            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+            Assert.Equal(new SpeechOptions(_modelPath, "uk", false), _recognizer.Preloads[0]);
+            Assert.Empty(_recorder.StartedDevices);
+        }
 
-            await Task.Delay(400);
-            Assert.Equal(1, _recognizer.UnloadCalls);
+        [Fact]
+        public async Task Configure_WithoutAModelOrDisabled_LoadsNothing()
+        {
+            await WaitUntil(() => _recognizer.Preloads.Count > 0); // the one made for the constructor's settings
+            Recreate(modelPath: _modelPath + ".missing");
+            lock (_recognizer.Preloads) _recognizer.Preloads.Clear();
+
+            _orchestrator.Configure(SpeechSettings.Disabled);
+            await Task.Delay(200);
+
+            Assert.Empty(_recognizer.Preloads);
+        }
+
+        // A load ahead of time that fails is not reported: the hotkey press tries again and reports it then
+        [Fact]
+        public async Task FailedLoadAheadOfTime_IsReportedOnlyWhenDictating()
+        {
+            _recognizer.PreloadError = new SpeechException(SpeechError.CpuUnsupported, "No AVX2");
+            Recreate();
+            await WaitUntil(() => _recognizer.Preloads.Count > 0);
+            Assert.False(_events.TryTake(out _, 200));
+
+            _orchestrator.OnHotkeyPressed();
+
+            Assert.Equal(SpeechState.Recording, Next().State);
+            Assert.Equal(SpeechError.CpuUnsupported, NextIdle().Error);
+        }
+
+        // Shown before the microphone is open, so the press is acknowledged at once
+        [Fact]
+        public void Recording_IsReportedBeforeTheMicrophoneOpens()
+        {
+            _recorder.StartError = new SpeechException(SpeechError.MicrophoneUnavailable, "No microphone");
+
+            _orchestrator.OnHotkeyPressed();
+
+            Assert.Equal(SpeechState.Recording, Next().State);
+            Assert.Equal(SpeechError.MicrophoneUnavailable, NextIdle().Error);
+        }
+
+        private static async Task WaitUntil(Func<bool> condition)
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            while (!condition())
+            {
+                Assert.True(watch.Elapsed < WaitLimit, "The condition was not met in time");
+                await Task.Delay(10);
+            }
         }
 
         [Fact]

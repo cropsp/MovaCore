@@ -33,7 +33,6 @@ namespace MovaCore.Services
         private bool _restoreClipboard;
         private long _recordingStarted;
         private bool _ignoreNextRelease;
-        private int _idleVersion;
 
         public SpeechOrchestrator(IAudioRecorder recorder, ISpeechRecognizer recognizer, TextPaster paster)
         {
@@ -57,15 +56,19 @@ namespace MovaCore.Services
         /// <summary>The hook misses the release of a key let go while a UAC prompt has the secure desktop.</summary>
         internal TimeSpan MaxRecording { get; init; } = TimeSpan.FromMinutes(2);
 
-        /// <summary>The model takes hundreds of megabytes; it is freed after this long without dictation.</summary>
-        internal TimeSpan IdleUnload { get; init; } = TimeSpan.FromMinutes(10);
-
         internal static TimeSpan MinAudioLength { get; } = TimeSpan.FromSeconds(1.25);
 
+        /// <summary>
+        /// Applies the settings. With dictation on and the model on disk, the model is loaded right away and stays
+        /// loaded, so that no dictation waits for it.
+        /// </summary>
         public void Configure(SpeechSettings settings)
         {
             _settings = settings;
-            if (!settings.Enabled) Cancel();
+            if (!settings.Enabled)
+                Cancel();
+            else if (SpeechModelFile.Check(settings.ModelPath) == SpeechModelFormat.Ggml)
+                Post(new PreloadRequested(new SpeechOptions(settings.ModelPath!, settings.Language, settings.UseGpu)));
         }
 
         /// <summary>Called on the hook thread: never blocks.</summary>
@@ -118,9 +121,8 @@ namespace MovaCore.Services
                 case WorkDone done when done.Generation == _generation && _state == SpeechState.Transcribing:
                     SetIdle(done.Outcome, done.Error, done.Detail);
                     break;
-                case IdleTimeout idle when idle.Version == _idleVersion && _state == SpeechState.Idle:
-                    AppLog.Info("Dictation: the speech model is unloaded after a while without use");
-                    _recognizer.Unload();
+                case PreloadRequested preload:
+                    _ = PreloadAsync(preload.Options, generation: null);
                     break;
             }
         }
@@ -134,7 +136,6 @@ namespace MovaCore.Services
 
             SpeechSettings settings = _settings;
             if (!settings.Enabled) return;
-            _idleVersion++; // the model stays loaded while it is in use
 
             switch (SpeechModelFile.Check(settings.ModelPath))
             {
@@ -147,6 +148,15 @@ namespace MovaCore.Services
                     return;
             }
 
+            int generation = ++_generation;
+            _options = new SpeechOptions(settings.ModelPath!, settings.Language, settings.UseGpu);
+            _restoreClipboard = settings.RestoreClipboard;
+            _recordingStarted = Stopwatch.GetTimestamp();
+            _workCts?.Dispose();
+            _workCts = new CancellationTokenSource();
+            // Shown at once: opening the microphone can take a moment, and the user should see the press was taken
+            SetState(new SpeechStateChangedEventArgs(SpeechState.Recording));
+
             try
             {
                 _recorder.Start(settings.MicrophoneId);
@@ -156,16 +166,9 @@ namespace MovaCore.Services
                 Fail(ex);
                 return;
             }
+            AppLog.Info($"Dictation: the microphone was ready in {Stopwatch.GetElapsedTime(_recordingStarted).TotalMilliseconds:0} ms");
 
-            int generation = ++_generation;
-            _options = new SpeechOptions(settings.ModelPath!, settings.Language, settings.UseGpu);
-            _restoreClipboard = settings.RestoreClipboard;
-            _recordingStarted = Stopwatch.GetTimestamp();
-            _workCts?.Dispose();
-            _workCts = new CancellationTokenSource();
-            SetState(new SpeechStateChangedEventArgs(SpeechState.Recording));
-
-            // The model loads while the user speaks
+            // Normally loaded already (see Configure); otherwise it loads while the user speaks
             _ = PreloadAsync(_options, generation);
             _ = Task.Delay(MaxRecording, _workCts.Token).ContinueWith(
                 t => Post(new Released(generation)), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion,
@@ -200,10 +203,13 @@ namespace MovaCore.Services
             }
             if (AudioSamples.IsSilent(samples))
             {
-                Discard($"{audio.TotalSeconds:0.0} s of audio without speech (peak {AudioSamples.Peak(samples):0.000})");
+                Discard($"{audio.TotalSeconds:0.0} s of audio without speech (peak {AudioSamples.ToDecibels(AudioSamples.Peak(samples)):0} dBFS)");
                 return;
             }
 
+            // Levels only, never the audio: they tell a quiet microphone from a problem elsewhere
+            AppLog.Info($"Dictation: {audio.TotalSeconds:0.0} s recorded, peak {AudioSamples.ToDecibels(AudioSamples.Peak(samples)):0} dBFS, " +
+                $"RMS {AudioSamples.ToDecibels(AudioSamples.Rms(samples)):0} dBFS");
             SetState(new SpeechStateChangedEventArgs(SpeechState.Transcribing));
             _ = TranscribeAsync(samples, _options!, _restoreClipboard, _generation, _workCts!.Token);
         }
@@ -219,7 +225,8 @@ namespace MovaCore.Services
             SetIdle(SpeechOutcome.Cancelled);
         }
 
-        private async Task PreloadAsync(SpeechOptions options, int generation)
+        /// <param name="generation">The dictation waiting for the model, or null for a load ahead of time.</param>
+        private async Task PreloadAsync(SpeechOptions options, int? generation)
         {
             try
             {
@@ -228,9 +235,14 @@ namespace MovaCore.Services
             catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested)
             {
             }
+            catch (Exception ex) when (generation is int waiting)
+            {
+                Post(new PreloadFailed(waiting, ex));
+            }
             catch (Exception ex)
             {
-                Post(new PreloadFailed(generation, ex));
+                // Reported when the user presses the hotkey: loading is tried again then
+                Describe(ex);
             }
         }
 
@@ -322,11 +334,6 @@ namespace MovaCore.Services
         private void SetIdle(SpeechOutcome outcome, SpeechError? error = null, string? detail = null)
         {
             SetState(new SpeechStateChangedEventArgs(SpeechState.Idle, outcome, error, detail));
-
-            int version = ++_idleVersion;
-            _ = Task.Delay(IdleUnload, _disposeCts.Token).ContinueWith(
-                t => Post(new IdleTimeout(version)), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion,
-                TaskScheduler.Default);
         }
 
         private void SetState(SpeechStateChangedEventArgs change)
@@ -357,6 +364,6 @@ namespace MovaCore.Services
         private sealed record CancelRequested : Command;
         private sealed record PreloadFailed(int Generation, Exception Error) : Command;
         private sealed record WorkDone(int Generation, SpeechOutcome Outcome, SpeechError? Error, string? Detail) : Command;
-        private sealed record IdleTimeout(int Version) : Command;
+        private sealed record PreloadRequested(SpeechOptions Options) : Command;
     }
 }

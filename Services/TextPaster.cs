@@ -30,6 +30,12 @@ namespace MovaCore.Services
         /// <summary>Pause after the paste is read, for apps that read the clipboard twice or insert slowly.</summary>
         internal TimeSpan RestoreDelay { get; init; } = TimeSpan.FromMilliseconds(250);
 
+        /// <summary>
+        /// Pause after Ctrl+V when the paste cannot be seen: something (a clipboard manager, a browser) read the text
+        /// as soon as it was put there, and later reads no longer reach us.
+        /// </summary>
+        internal TimeSpan UnobservedPasteDelay { get; init; } = TimeSpan.FromMilliseconds(600);
+
         /// <summary>Blocks on simulated key presses: call it on a worker thread, never the UI or hook thread.</summary>
         public async Task<PasteResult> PasteAsync(string text, bool restoreClipboard)
         {
@@ -39,22 +45,32 @@ namespace MovaCore.Services
             {
                 ClipboardSnapshot? snapshot = restoreClipboard ? await _clipboardService.TryCaptureAsync() : null;
 
+                long setStarted = Stopwatch.GetTimestamp();
                 if (!await _clipboardService.TrySetTextAsync(text)) return PasteResult.ClipboardFailed;
                 uint sequenceAfterSet = _clipboardService.GetSequenceNumber();
 
                 await Task.Delay(50);
+                // Delayed rendering reports only the first read: if something has read the text already, the paste
+                // itself will not be seen, so wait a fixed time instead of the read
+                bool readEarly = await _clipboardService.WaitForTextReadAsync(setStarted, TimeSpan.Zero);
                 long pasteStarted = Stopwatch.GetTimestamp();
                 _hotkeyService.SimulatePaste();
 
-                // Restoring before the app has read the text would make it paste the old clipboard content instead
-                if (!await _clipboardService.WaitForTextReadAsync(pasteStarted, PasteTimeout))
+                if (readEarly)
+                {
+                    await Task.Delay(UnobservedPasteDelay);
+                }
+                else if (!await _clipboardService.WaitForTextReadAsync(pasteStarted, PasteTimeout))
+                {
+                    // Restoring before the app has read the text would make it paste the old clipboard content instead
                     return PasteResult.NotObserved;
-
-                if (snapshot != null)
+                }
+                else
                 {
                     await Task.Delay(RestoreDelay);
-                    await _clipboardService.TryRestoreAsync(snapshot, sequenceAfterSet);
                 }
+
+                if (snapshot != null) await _clipboardService.TryRestoreAsync(snapshot, sequenceAfterSet);
                 return PasteResult.Pasted;
             }
             finally

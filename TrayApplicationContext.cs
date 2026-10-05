@@ -207,9 +207,10 @@ namespace MovaCore
                     return;
             }
 
+            // Not pasted (no text field had the focus): the text stays on the clipboard without a word, the user asked
+            // for fewer messages
             string? message = e.Outcome switch
             {
-                SpeechOutcome.NotPasted => Strings.BalloonNotPasted,
                 SpeechOutcome.Failed when e.Error == SpeechError.ModelMissing
                     && _downloads.State.Status == ModelDownloadStatus.Downloading
                     => Strings.SpeechModelStillDownloading(_downloads.State.Percent),
@@ -240,6 +241,10 @@ namespace MovaCore
         private void ShowDownloadState(ModelDownloadState state)
         {
             UpdateTrayStatus();
+
+            // A downloaded model is loaded right away, so the first dictation does not wait for it
+            if (state.Status == ModelDownloadStatus.Completed && state.ModelId == _currentSettings.SpeechModel)
+                ApplySpeechSettings();
             if (!_currentSettings.ShowNotifications) return;
 
             if (state.Status == ModelDownloadStatus.Completed && state.ModelId == _currentSettings.SpeechModel)

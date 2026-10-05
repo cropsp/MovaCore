@@ -49,10 +49,6 @@ namespace MovaCore
         public static string BalloonUnexpectedError(string reason) =>
             string.Format(T("Unexpected error: {0}", "Неочікувана помилка: {0}"), reason);
 
-        public static string BalloonNotPasted => T(
-            "The recognized text is on the clipboard: paste it with Ctrl+V.",
-            "Розпізнаний текст у буфері обміну: вставте його через Ctrl+V.");
-
         public static string BalloonModelReady(string hotkey) => string.Format(T(
             "The speech model is ready. Hold {0} and speak.",
             "Модель розпізнавання готова. Утримуйте {0} і говоріть."), hotkey);

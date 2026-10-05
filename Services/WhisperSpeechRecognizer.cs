@@ -75,20 +75,6 @@ namespace MovaCore.Services
                 }
             }, cancellationToken);
 
-        /// <summary>Frees the model unless it is in use right now (then the next idle period frees it).</summary>
-        public void Unload()
-        {
-            if (!_lock.Wait(0)) return;
-            try
-            {
-                Free();
-            }
-            finally
-            {
-                _lock.Release();
-            }
-        }
-
         /// <summary>
         /// Chooses and loads the native runtime, as the first dictation would, and describes it (for the smoke test).
         /// </summary>

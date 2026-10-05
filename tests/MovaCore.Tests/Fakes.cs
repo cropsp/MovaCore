@@ -19,6 +19,11 @@ namespace MovaCore.Tests
         /// <summary>Whether the app is seen reading the converted text after Ctrl+V (WM_RENDERFORMAT in reality).</summary>
         public bool PasteObserved { get; set; } = true;
 
+        /// <summary>Something (a clipboard manager) reads our text as soon as it is set, so the paste is not seen.</summary>
+        public bool ReadOnSet { get; set; }
+
+        private long _setTimestamp = long.MaxValue;
+
         /// <summary>True while the clipboard holds content written by us, as GetClipboardOwner would report.</summary>
         public bool OwnedByUs { get; private set; }
 
@@ -56,10 +61,14 @@ namespace MovaCore.Tests
             LastSetText = text;
             OwnedByUs = true;
             Sequence++;
+            _setTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
             return Task.FromResult(true);
         }
 
-        public Task<bool> WaitForTextReadAsync(long sinceTimestamp, TimeSpan timeout) => Task.FromResult(PasteObserved);
+        // A read right at the set counts for every later query that started before it; otherwise PasteObserved
+        // answers for queries that started after the set (the Ctrl+V)
+        public Task<bool> WaitForTextReadAsync(long sinceTimestamp, TimeSpan timeout) =>
+            Task.FromResult(ReadOnSet ? sinceTimestamp <= _setTimestamp : PasteObserved && sinceTimestamp > _setTimestamp);
 
         public Task<bool> TryRestoreAsync(ClipboardSnapshot snapshot, uint expectedSequence)
         {

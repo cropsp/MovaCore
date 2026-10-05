@@ -21,6 +21,9 @@ namespace MovaCore.Services
 
         public static TimeSpan Duration(int sampleCount) => TimeSpan.FromSeconds((double)sampleCount / SampleRate);
 
+        /// <summary>A level from 0 to 1 in dBFS, floored at -100 (for the log and the level meter).</summary>
+        public static double ToDecibels(float level) => level <= 1e-5f ? -100 : 20 * Math.Log10(level);
+
         public static float Peak(ReadOnlySpan<float> samples)
         {
             float peak = 0;

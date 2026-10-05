@@ -306,7 +306,9 @@ namespace MovaCore.UI
             _modelComboBox.SelectedIndexChanged += (_, _) => UpdateVoiceControls();
 
             _modelStatusLabel.AutoSize = true;
+            // A fixed width: the progress text changes several times a second and must not move the button
             _modelStatusLabel.MaximumSize = new Size(ContentWidth - ButtonMinWidth - 24, 0);
+            _modelStatusLabel.MinimumSize = new Size(ContentWidth - ButtonMinWidth - 24, 0);
             _modelStatusLabel.Anchor = AnchorStyles.Left;
             _modelActionButton.Anchor = AnchorStyles.Right;
             ConfigureButton(_modelActionButton);
@@ -614,39 +616,52 @@ namespace MovaCore.UI
                         SpeechModelFormat.Missing => Strings.SpeechCustomMissing,
                         _ => Strings.SpeechCustomUnknown,
                     };
-                _modelActionButton.Visible = false;
-                _modelProgress.Visible = false;
+                if (_modelActionButton.Visible) _modelActionButton.Visible = false;
+                if (_modelProgress.Visible) _modelProgress.Visible = false;
                 return;
             }
 
             ModelDownloadState state = _downloads.State;
             bool thisModel = state.ModelId == model.Id;
-            _modelProgress.Visible = false;
-            _modelActionButton.Visible = true;
-            _modelActionButton.Text = Strings.SpeechModelDownload;
+            string status;
+            string action = Strings.SpeechModelDownload;
+            bool showAction = true;
+            bool showProgress = false;
 
             if (thisModel && state.Status == ModelDownloadStatus.Downloading)
             {
-                _modelStatusLabel.Text = state.TotalBytes is long total
+                status = state.TotalBytes is long total
                     ? Strings.SpeechModelDownloading(Strings.FormatSize(state.BytesReceived), Strings.FormatSize(total), state.Percent ?? 0)
                     : Strings.SpeechModelDownloadStarting;
-                _modelActionButton.Text = Strings.Cancel;
-                _modelProgress.Visible = true;
-                _modelProgress.Value = Math.Clamp(state.Percent ?? 0, 0, 100);
+                action = Strings.Cancel;
+                showProgress = true;
             }
             else if (_downloads.IsDownloaded(model))
             {
-                _modelStatusLabel.Text = Strings.SpeechModelReady;
-                _modelActionButton.Visible = false;
+                status = Strings.SpeechModelReady;
+                showAction = false;
             }
             else if (thisModel && state.Status == ModelDownloadStatus.Failed && state.Error is { } error)
             {
-                _modelStatusLabel.Text = Strings.SpeechModelDownloadFailed(Strings.DownloadErrorText(error));
+                status = Strings.SpeechModelDownloadFailed(Strings.DownloadErrorText(error));
             }
             else
             {
-                _modelStatusLabel.Text = Strings.SpeechModelNotDownloaded(Strings.FormatSize(model.ApproximateBytes));
+                status = Strings.SpeechModelNotDownloaded(Strings.FormatSize(model.ApproximateBytes));
             }
+
+            // Progress arrives several times a second: touch only what changed, or every report would hide and show
+            // the bar and relabel the button, and the rows below would jump
+            SetIfChanged(_modelStatusLabel, status);
+            SetIfChanged(_modelActionButton, action);
+            if (_modelActionButton.Visible != showAction) _modelActionButton.Visible = showAction;
+            if (_modelProgress.Visible != showProgress) _modelProgress.Visible = showProgress;
+            if (showProgress) _modelProgress.Value = Math.Clamp(state.Percent ?? 0, 0, 100);
+        }
+
+        private static void SetIfChanged(Control control, string text)
+        {
+            if (control.Text != text) control.Text = text;
         }
 
         private void OnModelActionClick(object? sender, EventArgs e)
