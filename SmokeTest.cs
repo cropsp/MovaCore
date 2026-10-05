@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -9,6 +12,7 @@ using MovaCore.Services;
 using MovaCore.UI;
 using SharpHook;
 using SharpHook.Data;
+using Whisper.net.Wave;
 
 namespace MovaCore
 {
@@ -18,10 +22,15 @@ namespace MovaCore
     /// delayed rendering, converter, native hook library) and exits. CI runs it against the published executable; it
     /// passes only if no error was logged.
     /// It never simulates key presses: on a CI runner they would land in the job's console.
+    /// Dictation: the microphone list, the recording indicator, the file dialog, the Whisper runtime (and a real
+    /// transcription when CI passes a model and a recording) and the model download's network path.
     /// </summary>
-    internal static class SmokeTest
+    internal static partial class SmokeTest
     {
         private const int StepIntervalMs = 1500;
+        private const uint WM_CLOSE = 0x0010;
+
+        private static IntPtr _dialogToClose; // found by the EnumThreadWindows callback
 
         public static bool Completed { get; private set; }
 
@@ -29,7 +38,12 @@ namespace MovaCore
             ApplicationContext context,
             IClipboardService clipboard,
             ILayoutConverterService converter,
-            IHotkeyService hotkeys)
+            IHotkeyService hotkeys,
+            IAudioRecorder recorder,
+            ModelDownloader downloader,
+            ModelDownloadManager downloads,
+            string? modelPath,
+            string? audioPath)
         {
             var timer = new System.Windows.Forms.Timer { Interval = StepIntervalMs };
             SettingsForm? form = null;
@@ -43,11 +57,16 @@ namespace MovaCore
                     switch (step++)
                     {
                         case 0:
-                            form = new SettingsForm(new AppSettings(), _ => Task.FromResult<Hotkey?>(null));
+                            IReadOnlyList<AudioInputDevice> microphones = recorder.GetInputDevices();
+                            // CI runners have no microphone: listing them must work, finding none is fine
+                            AppLog.Info($"Smoke test: {microphones.Count} microphone(s) found");
+                            form = new SettingsForm(new AppSettings(), _ => Task.FromResult<Hotkey?>(null), microphones, downloads);
                             form.Show();
                             break;
                         case 1:
-                            CheckSettingsFormSize(form!);
+                            // Controls on a tab page are created when the page is first shown
+                            for (int i = form!.Tabs.TabCount - 1; i >= 0; i--) form.Tabs.SelectedIndex = i;
+                            CheckSettingsFormSize(form);
                             await CheckConverterAndClipboardAsync(clipboard, converter);
                             break;
                         case 2:
@@ -63,6 +82,19 @@ namespace MovaCore
                             break;
                         case 5:
                             await CheckHotkeyCaptureAsync(hotkeys);
+                            break;
+                        case 6:
+                            CheckRecordingIndicator();
+                            CheckIcons();
+                            break;
+                        case 7:
+                            CheckFileDialog(form!);
+                            break;
+                        case 8:
+                            await CheckSpeechRecognitionAsync(modelPath, audioPath);
+                            break;
+                        case 9:
+                            await CheckModelDownloadAsync(downloader);
                             break;
                         default:
                             form?.Close();
@@ -169,6 +201,150 @@ namespace MovaCore
                 AppLog.Info("Smoke test: hotkey recording checked");
         }
 
+        // The indicator must never take the focus: the recognized text goes to the window the user is typing in
+        private static void CheckRecordingIndicator()
+        {
+            IntPtr foregroundBefore = GetForegroundWindow();
+            using var overlay = new RecordingOverlay(() => 0.5f);
+            overlay.ShowRecording();
+            if (!overlay.Visible) AppLog.Error("Smoke test: the recording indicator did not show");
+            overlay.ShowTranscribing();
+            overlay.ShowMessage(Strings.SpeechErrorText(SpeechError.MicrophoneUnavailable, null));
+            if (GetForegroundWindow() != foregroundBefore) AppLog.Error("Smoke test: the recording indicator took the focus");
+            overlay.HideOverlay();
+            AppLog.Info("Smoke test: recording indicator checked");
+        }
+
+        private static void CheckIcons()
+        {
+            Size size = SystemInformation.SmallIconSize;
+            Icon?[] icons = { AppResources.LoadIcon(size), AppResources.LoadRecordingIcon(size), AppResources.LoadTranscribingIcon(size) };
+            foreach (Icon? icon in icons)
+            {
+                if (icon == null) AppLog.Error("Smoke test: an embedded tray icon is missing");
+                icon?.Dispose();
+            }
+        }
+
+        // The model's Browse button opens a common file dialog (COM under the hood); a timer inside its modal loop
+        // closes it again
+        private static void CheckFileDialog(Form owner)
+        {
+            using var dialog = new OpenFileDialog { Filter = Strings.SpeechModelFileFilter };
+            using var closer = new System.Windows.Forms.Timer { Interval = 1000 };
+            bool closed = false;
+            closer.Tick += (_, _) =>
+            {
+                _dialogToClose = IntPtr.Zero;
+                unsafe
+                {
+                    EnumThreadWindows(GetCurrentThreadId(), &FindDialog, IntPtr.Zero);
+                }
+                if (_dialogToClose == IntPtr.Zero) return;
+                PostMessage(_dialogToClose, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                closed = true;
+                closer.Stop();
+            };
+            closer.Start();
+            dialog.ShowDialog(owner);
+
+            if (closed)
+                AppLog.Info("Smoke test: file dialog opened and closed");
+            else
+                AppLog.Error("Smoke test: the file dialog did not open");
+        }
+
+        [UnmanagedCallersOnly]
+        private static unsafe int FindDialog(IntPtr window, IntPtr parameter)
+        {
+            // #32770 is the window class of dialog boxes, the common file dialog included
+            const int capacity = 16;
+            char* name = stackalloc char[capacity];
+            int length = GetClassNameW(window, name, capacity);
+            if (IsWindowVisible(window) && new ReadOnlySpan<char>(name, length).SequenceEqual("#32770"))
+            {
+                _dialogToClose = window;
+                return 0; // stop
+            }
+            return 1;
+        }
+
+        private static async Task CheckSpeechRecognitionAsync(string? modelPath, string? audioPath)
+        {
+            try
+            {
+                AppLog.Info("Smoke test: speech runtime " + WhisperSpeechRecognizer.LoadRuntime(useGpu: true));
+            }
+            catch (SpeechException ex) when (ex.Error == SpeechError.CpuUnsupported)
+            {
+                AppLog.Info($"Smoke test: speech recognition not checked: {ex.Message}");
+                return;
+            }
+            catch (SpeechException ex)
+            {
+                AppLog.Error($"Smoke test: the speech runtime did not load ({ex.Error}): {ex.Message}");
+                return;
+            }
+
+            if (modelPath == null)
+            {
+                AppLog.Info("Smoke test: no model given (--smoke-test-model), transcription not checked");
+                return;
+            }
+
+            // A recording of "hello world" if CI could make one, a second of a tone otherwise
+            float[] audio;
+            if (audioPath != null)
+            {
+                using FileStream wave = File.OpenRead(audioPath);
+                audio = new WaveParser(wave).GetAvgSamples();
+            }
+            else
+            {
+                audio = new float[AudioSamples.SampleRate];
+                for (int i = 0; i < audio.Length; i++) audio[i] = 0.2f * MathF.Sin(2 * MathF.PI * 440 * i / AudioSamples.SampleRate);
+            }
+
+            using var recognizer = new WhisperSpeechRecognizer();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var watch = Stopwatch.StartNew();
+            IReadOnlyList<string> segments = await recognizer.TranscribeAsync(
+                AudioSamples.PadToMinimum(audio, SpeechOrchestrator.MinAudioLength),
+                new SpeechOptions(modelPath, "en", UseGpu: true),
+                timeout.Token);
+            // Synthetic audio, so the text may be logged
+            string text = TranscriptText.Clean(segments);
+            AppLog.Info($"Smoke test: transcribed in {watch.Elapsed.TotalSeconds:0.0} s: \"{text}\"");
+            if (audioPath != null && !text.Contains("hello", StringComparison.OrdinalIgnoreCase))
+                AppLog.Error("Smoke test: the recording of \"hello world\" was not recognized");
+        }
+
+        // A 4 KB range request for the default model: TLS, the redirect to the CDN and the hash header, in the
+        // published exe. Without network access this is not an error.
+        private static async Task CheckModelDownloadAsync(ModelDownloader downloader)
+        {
+            SpeechModelInfo model = SpeechModelCatalog.Find(SpeechModelCatalog.DefaultId)!;
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            RemoteFileProbe probe;
+            try
+            {
+                probe = await downloader.ProbeAsync(SpeechModelCatalog.DownloadUrl(model), 4096, timeout.Token);
+            }
+            catch (Exception ex) when (ex is ModelDownloadException or OperationCanceledException)
+            {
+                AppLog.Info($"Smoke test: model download not checked (no network?): {ex.Message}");
+                return;
+            }
+
+            if (!probe.Prefix.AsSpan().StartsWith("lmgg"u8))
+                AppLog.Error("Smoke test: the model download is not a whisper.cpp model");
+            // Without the hash, a download of this model would be checked by size and format only
+            if (probe.Sha256 == null)
+                AppLog.Error("Smoke test: Hugging Face did not report the SHA-256 of the default model");
+            AppLog.Info($"Smoke test: model download reachable: {model.FileName}, " +
+                $"{probe.Size?.ToString() ?? "unknown"} bytes, SHA-256 {probe.Sha256 ?? "unknown"}");
+        }
+
         private static async Task CheckConverterAndClipboardAsync(IClipboardService clipboard, ILayoutConverterService converter)
         {
             string converted = converter.Convert("ghbdsn");
@@ -229,5 +405,26 @@ namespace MovaCore
 
             AppLog.Info("Smoke test: clipboard capture, paste detection and restore checked");
         }
+
+        [LibraryImport("user32.dll")]
+        private static partial IntPtr GetForegroundWindow();
+
+        [LibraryImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static unsafe partial bool EnumThreadWindows(uint threadId, delegate* unmanaged<IntPtr, IntPtr, int> callback, IntPtr parameter);
+
+        [LibraryImport("user32.dll", EntryPoint = "GetClassNameW")]
+        private static unsafe partial int GetClassNameW(IntPtr window, char* className, int maxCount);
+
+        [LibraryImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static partial bool IsWindowVisible(IntPtr window);
+
+        [LibraryImport("user32.dll", EntryPoint = "PostMessageW")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static partial bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+
+        [LibraryImport("kernel32.dll")]
+        private static partial uint GetCurrentThreadId();
     }
 }

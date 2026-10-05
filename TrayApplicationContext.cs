@@ -17,11 +17,18 @@ namespace MovaCore
 
         private readonly NotifyIcon _notifyIcon;
         private readonly Icon? _trayIcon;
+        private readonly Icon? _recordingIcon;
+        private readonly Icon? _transcribingIcon;
         private readonly IHotkeyService _hotkeyService;
         private readonly HotkeyOrchestrator _orchestrator;
         private readonly SettingsService _settingsService;
+        private readonly SpeechOrchestrator _speech;
+        private readonly IAudioRecorder _recorder;
+        private readonly ModelDownloadManager _downloads;
+        private readonly RecordingOverlay _overlay;
         private readonly SynchronizationContext _uiContext;
         private AppSettings _currentSettings;
+        private SpeechState _speechState = SpeechState.Idle; // UI thread only
 
         // Created together with the tray menu, after the language is known (see ApplyLanguage)
         private ToolStripMenuItem? _settingsItem;
@@ -35,19 +42,27 @@ namespace MovaCore
         public TrayApplicationContext(
             IHotkeyService hotkeyService,
             HotkeyOrchestrator orchestrator,
-            SettingsService settingsService)
+            SettingsService settingsService,
+            SpeechOrchestrator speech,
+            IAudioRecorder recorder,
+            ModelDownloadManager downloads)
         {
             _hotkeyService = hotkeyService;
             _orchestrator = orchestrator;
             _settingsService = settingsService;
+            _speech = speech;
+            _recorder = recorder;
+            _downloads = downloads;
 
             // Load and apply settings
             _currentSettings = _settingsService.Load();
-            ApplySettings();
             ApplyLanguage(); // before the tray icon and its menu are created, so they start in the right language
 
             // Initialize NotifyIcon
-            _trayIcon = LoadTrayIcon();
+            _trayIcon = LoadTrayIcon(AppResources.LoadIcon);
+            _recordingIcon = LoadTrayIcon(AppResources.LoadRecordingIcon);
+            _transcribingIcon = LoadTrayIcon(AppResources.LoadTranscribingIcon);
+            _overlay = new RecordingOverlay(() => _speech.CurrentLevel);
             _notifyIcon = new NotifyIcon
             {
                 Icon = _trayIcon ?? SystemIcons.Application,
@@ -61,9 +76,16 @@ namespace MovaCore
             _uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
             _orchestrator.ConversionFailed += OnConversionFailed;
             _hotkeyService.HookFailed += OnHookFailed;
+            _speech.StateChanged += OnSpeechStateChanged;
+            _downloads.StateChanged += OnDownloadStateChanged;
+
+            // Applied once the handlers are in place: it may start (resume) the model download
+            ApplySettings();
 
             // Start Hotkey Service
             _hotkeyService.HotkeyTriggered += OnHotkeyTriggered;
+            _hotkeyService.SpeechHotkeyPressed += OnSpeechHotkeyPressed;
+            _hotkeyService.SpeechHotkeyReleased += OnSpeechHotkeyReleased;
             _hotkeyService.Start();
         }
 
@@ -76,6 +98,23 @@ namespace MovaCore
             _orchestrator.SwitchLayout = _currentSettings.SwitchLayout;
             _orchestrator.SelectConvertedText = _currentSettings.SelectConvertedText;
             _orchestrator.ConvertLastWord = _currentSettings.ConvertLastWord;
+            ApplySpeechSettings();
+        }
+
+        private void ApplySpeechSettings()
+        {
+            AppSettings s = _currentSettings;
+            _hotkeyService.SetSpeechHotkey(s.SpeechEnabled ? s.SpeechHotkey : null);
+            _speech.Configure(new SpeechSettings(
+                s.SpeechEnabled,
+                SpeechModelCatalog.ResolvePath(s.SpeechModel, s.SpeechCustomModelPath, _downloads.ModelsDirectory),
+                s.SpeechLanguage,
+                s.SpeechUseGpu,
+                s.SpeechMicrophoneId,
+                s.RestoreClipboard));
+
+            // Turning dictation on downloads the chosen model (and resumes an interrupted download at startup)
+            if (s.SpeechEnabled && SpeechModelCatalog.Selected(s.SpeechModel) is { } model) _downloads.Start(model);
         }
 
         private void ApplyLanguage()
@@ -94,14 +133,33 @@ namespace MovaCore
             _pauseItem.Checked = _paused;
             _aboutItem.Text = Strings.MenuAbout;
             _exitItem.Text = Strings.MenuExit;
-            _notifyIcon.Text = _paused ? Strings.TrayTooltipPaused : Strings.TrayTooltip;
+            UpdateTrayStatus();
         }
 
-        private static Icon? LoadTrayIcon()
+        // The icon and its tooltip show what MovaCore is doing right now
+        private void UpdateTrayStatus()
+        {
+            ModelDownloadState download = _downloads.State;
+            _notifyIcon.Text = _paused ? Strings.TrayTooltipPaused
+                : _speechState == SpeechState.Recording ? Strings.TrayTooltipRecording
+                : _speechState == SpeechState.Transcribing ? Strings.TrayTooltipTranscribing
+                : download.Status == ModelDownloadStatus.Downloading ? Strings.TrayTooltipDownloading(download.Percent)
+                : Strings.TrayTooltip;
+
+            Icon? icon = _speechState switch
+            {
+                SpeechState.Recording => _recordingIcon,
+                SpeechState.Transcribing => _transcribingIcon,
+                _ => null,
+            };
+            _notifyIcon.Icon = icon ?? _trayIcon ?? SystemIcons.Application;
+        }
+
+        private static Icon? LoadTrayIcon(Func<Size, Icon?> load)
         {
             try
             {
-                return AppResources.LoadIcon(SystemInformation.SmallIconSize);
+                return load(SystemInformation.SmallIconSize);
             }
             catch (Exception ex)
             {
@@ -119,6 +177,75 @@ namespace MovaCore
                     _notifyIcon.ShowBalloonTip(3000, AppName, message, ToolTipIcon.Info);
                 }
             }, null);
+        }
+
+        // Raised on a worker thread
+        private void OnSpeechStateChanged(object? sender, SpeechStateChangedEventArgs e)
+        {
+            _uiContext.Post(_ => ShowSpeechState(e), null);
+        }
+
+        private void ShowSpeechState(SpeechStateChangedEventArgs e)
+        {
+            _speechState = e.State;
+            UpdateTrayStatus();
+
+            bool overlay = _currentSettings.SpeechShowOverlay;
+            switch (e.State)
+            {
+                case SpeechState.Recording:
+                    if (overlay) _overlay.ShowRecording();
+                    return;
+                case SpeechState.Transcribing:
+                    if (overlay) _overlay.ShowTranscribing();
+                    return;
+            }
+
+            string? message = e.Outcome switch
+            {
+                SpeechOutcome.NotPasted => Strings.BalloonNotPasted,
+                SpeechOutcome.Failed when e.Error == SpeechError.ModelMissing
+                    && _downloads.State.Status == ModelDownloadStatus.Downloading
+                    => Strings.SpeechModelStillDownloading(_downloads.State.Percent),
+                SpeechOutcome.Failed => Strings.SpeechErrorText(e.Error ?? SpeechError.Failed, e.Detail),
+                _ => null,
+            };
+            if (message == null)
+            {
+                _overlay.HideOverlay();
+            }
+            else if (overlay)
+            {
+                _overlay.ShowMessage(message);
+            }
+            else
+            {
+                // The user just pressed the hotkey and nothing happened: say why, even with notifications off
+                _notifyIcon.ShowBalloonTip(4000, AppName, message, ToolTipIcon.Warning);
+            }
+        }
+
+        // Raised on a worker thread, several times a second while downloading
+        private void OnDownloadStateChanged(object? sender, ModelDownloadState state)
+        {
+            _uiContext.Post(_ => ShowDownloadState(state), null);
+        }
+
+        private void ShowDownloadState(ModelDownloadState state)
+        {
+            UpdateTrayStatus();
+            if (!_currentSettings.ShowNotifications) return;
+
+            if (state.Status == ModelDownloadStatus.Completed && state.ModelId == _currentSettings.SpeechModel)
+            {
+                _notifyIcon.ShowBalloonTip(
+                    4000, AppName, Strings.BalloonModelReady(_currentSettings.SpeechHotkey.ToString()), ToolTipIcon.Info);
+            }
+            else if (state.Status == ModelDownloadStatus.Failed && state.Error is { } error)
+            {
+                _notifyIcon.ShowBalloonTip(
+                    5000, AppName, Strings.BalloonModelDownloadFailed(Strings.DownloadErrorText(error)), ToolTipIcon.Warning);
+            }
         }
 
         private void OnHookFailed(object? sender, Exception error)
@@ -160,9 +287,14 @@ namespace MovaCore
         {
             _paused = !_paused;
             if (_paused)
+            {
                 _hotkeyService.Stop();
+                _speech.Cancel(); // the release of a held dictation hotkey would never arrive
+            }
             else
+            {
                 _hotkeyService.Start();
+            }
 
             UpdateTrayTexts();
         }
@@ -171,6 +303,11 @@ namespace MovaCore
         {
             Task.Run(async () => await _orchestrator.ExecuteConversionAsync());
         }
+
+        // Raised on the hook thread: the orchestrator only queues them
+        private void OnSpeechHotkeyPressed(object? sender, EventArgs e) => _speech.OnHotkeyPressed();
+
+        private void OnSpeechHotkeyReleased(object? sender, EventArgs e) => _speech.OnHotkeyReleased();
 
         private void ShowSettings()
         {
@@ -181,7 +318,12 @@ namespace MovaCore
                 return;
             }
 
-            using (var form = new SettingsForm(_currentSettings, ct => _hotkeyService.CaptureHotkeyAsync(ct)))
+            // No dictation while the settings are open: its hotkey may be about to change
+            _hotkeyService.SetSpeechHotkey(null);
+            _speech.Cancel();
+
+            using (var form = new SettingsForm(
+                _currentSettings, ct => _hotkeyService.CaptureHotkeyAsync(ct), _recorder.GetInputDevices(), _downloads))
             {
                 _settingsForm = form;
                 // Pausing or resuming while a hotkey is being recorded would leave the hook in the wrong state
@@ -196,6 +338,8 @@ namespace MovaCore
                 {
                     _settingsForm = null;
                     _pauseItem?.Enabled = true;
+                    // Back as it was; saved settings are applied below
+                    _hotkeyService.SetSpeechHotkey(_currentSettings.SpeechEnabled ? _currentSettings.SpeechHotkey : null);
                 }
 
                 if (result == DialogResult.OK && form.UpdatedSettings is { } updatedSettings)
@@ -251,6 +395,8 @@ namespace MovaCore
         {
             _notifyIcon.Visible = false;
             _hotkeyService.Stop();
+            _speech.Cancel();
+            _downloads.Cancel(); // the partial file stays: the download resumes at the next start
             Application.Exit();
         }
 
@@ -260,8 +406,15 @@ namespace MovaCore
             {
                 _orchestrator.ConversionFailed -= OnConversionFailed;
                 _hotkeyService.HookFailed -= OnHookFailed;
+                _hotkeyService.SpeechHotkeyPressed -= OnSpeechHotkeyPressed;
+                _hotkeyService.SpeechHotkeyReleased -= OnSpeechHotkeyReleased;
+                _speech.StateChanged -= OnSpeechStateChanged;
+                _downloads.StateChanged -= OnDownloadStateChanged;
                 _notifyIcon?.Dispose();
+                _overlay.Dispose();
                 _trayIcon?.Dispose();
+                _recordingIcon?.Dispose();
+                _transcribingIcon?.Dispose();
                 _hotkeyService?.Dispose();
             }
             base.Dispose(disposing);

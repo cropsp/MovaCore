@@ -41,10 +41,13 @@ namespace MovaCore.Services
 
         // Set on the UI thread, read on the hook thread: replaced as a whole, never mutated
         private volatile StrongBox<Hotkey> _trigger = new(new Hotkey(KeyCode.VcF10, HotkeyModifiers.None));
+        private volatile StrongBox<Hotkey?> _speech = new(null);
         private volatile HashSet<string> _excludedProcesses = new();
         private volatile CopyPasteKeys _copyPasteKeys = CopyPasteKeys.CtrlCV;
 
         public event EventHandler? HotkeyTriggered;
+        public event EventHandler? SpeechHotkeyPressed;
+        public event EventHandler? SpeechHotkeyReleased;
         public event EventHandler<Exception>? HookFailed;
 
         public HotkeyService()
@@ -69,6 +72,11 @@ namespace MovaCore.Services
         public void SetTrigger(Hotkey trigger)
         {
             _trigger = new StrongBox<Hotkey>(trigger);
+        }
+
+        public void SetSpeechHotkey(Hotkey? hotkey)
+        {
+            _speech = new StrongBox<Hotkey?>(hotkey);
         }
 
         public void SetExcludedProcesses(IEnumerable<string> processNames)
@@ -166,20 +174,21 @@ namespace MovaCore.Services
                 return;
             }
 
-            Hotkey trigger = _trigger.Value;
             HotkeyAction action = _tracker.OnKeyPressed(
-                key, e.RawEvent.Mask, e.IsEventSimulated, trigger, null, IsForegroundProcessExcluded);
+                key, e.RawEvent.Mask, e.IsEventSimulated, _trigger.Value, _speech.Value, IsForegroundProcessExcluded);
             if (action == HotkeyAction.PassThrough) return;
 
             e.SuppressEvent = true;
+            if (action == HotkeyAction.Suppress) return;
 
             // The app saw Alt/Win go down but will not see the suppressed key: mask the release of Alt/Win
-            if (action == HotkeyAction.TriggerPressed &&
-                (trigger.Modifiers & (HotkeyModifiers.Alt | HotkeyModifiers.Win)) != 0)
+            if (_tracker.Held is { } held && (held.Modifiers & (HotkeyModifiers.Alt | HotkeyModifiers.Win)) != 0)
             {
                 keybd_event(MenuMaskVirtualKey, 0, 0, 0);
                 keybd_event(MenuMaskVirtualKey, 0, KEYEVENTF_KEYUP, 0);
             }
+
+            if (action == HotkeyAction.SpeechPressed) SpeechHotkeyPressed?.Invoke(this, EventArgs.Empty);
         }
 
         private void OnKeyReleased(object? sender, KeyboardHookEventArgs e)
@@ -198,7 +207,10 @@ namespace MovaCore.Services
             if (action == HotkeyAction.PassThrough) return;
 
             e.SuppressEvent = true;
-            if (action == HotkeyAction.TriggerReleased) HotkeyTriggered?.Invoke(this, EventArgs.Empty);
+            if (action == HotkeyAction.TriggerReleased)
+                HotkeyTriggered?.Invoke(this, EventArgs.Empty);
+            else
+                SpeechHotkeyReleased?.Invoke(this, EventArgs.Empty);
         }
 
         private bool IsForegroundProcessExcluded()

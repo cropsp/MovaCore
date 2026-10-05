@@ -93,6 +93,7 @@ namespace MovaCore.Tests
         public List<int> SelectLeftCalls { get; } = new();
 
         public Hotkey? Trigger { get; private set; }
+        public Hotkey? SpeechHotkey { get; private set; }
         public List<string> ExcludedProcesses { get; } = new();
         public CopyPasteKeys CopyPasteKeys { get; set; }
 
@@ -109,9 +110,22 @@ namespace MovaCore.Tests
             remove { }
         }
 
+        public event EventHandler? SpeechHotkeyPressed
+        {
+            add { }
+            remove { }
+        }
+
+        public event EventHandler? SpeechHotkeyReleased
+        {
+            add { }
+            remove { }
+        }
+
         public void Start() { }
         public void Stop() { }
         public void SetTrigger(Hotkey trigger) => Trigger = trigger;
+        public void SetSpeechHotkey(Hotkey? hotkey) => SpeechHotkey = hotkey;
 
         public void SetExcludedProcesses(IEnumerable<string> processNames)
         {

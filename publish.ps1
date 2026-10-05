@@ -24,11 +24,18 @@ if (-not (Get-Command "dotnet" -ErrorAction SilentlyContinue)) {
 # Native AOT is enabled in the .csproj via <PublishAot>true</PublishAot>
 & $dotnetExe publish "$projectName.csproj" -c $configuration -r $runtime
 
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "Native AOT Build completed successfully!"
-    Write-Host "Output location: bin\$configuration\net10.0-windows\$runtime\publish\"
-    Write-Host "Ship MovaCore.exe together with uiohook.dll: Native AOT cannot embed the native hook library."
-} else {
+if ($LASTEXITCODE -ne 0) {
     Write-Host "Build failed. Please check the logs above."
     exit 1
 }
+
+# Speech recognition needs the VC++ runtime next to the Whisper DLLs (as CI does it, see .github/workflows/ci.yml)
+$publishDir = "bin\$configuration\net10.0-windows\$runtime\publish"
+& "$PSScriptRoot\eng\copy-vc-runtime.ps1" -PublishDir $publishDir -Rid $runtime
+& "$PSScriptRoot\eng\check-native-deps.ps1" -PublishDir $publishDir
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
+Write-Host "Native AOT Build completed successfully!"
+Write-Host "Output location: $publishDir\"
+Write-Host "Ship the whole folder: MovaCore.exe, uiohook.dll (the keyboard hook) and runtimes\ (speech recognition)."
+Write-Host "Native AOT cannot embed native libraries."

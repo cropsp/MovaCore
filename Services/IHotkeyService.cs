@@ -16,6 +16,9 @@ namespace MovaCore.Services
 
         void SetTrigger(Hotkey trigger);
 
+        /// <summary>The hold-to-talk dictation hotkey, or null while dictation is off.</summary>
+        void SetSpeechHotkey(Hotkey? hotkey);
+
         /// <summary>Applications (process names) in which the trigger is left alone.</summary>
         void SetExcludedProcesses(IEnumerable<string> processNames);
 
@@ -23,6 +26,12 @@ namespace MovaCore.Services
 
         /// <summary>Raised on the hook thread when the trigger key is released.</summary>
         event EventHandler? HotkeyTriggered;
+
+        /// <summary>Raised on the hook thread on the first press of the speech hotkey (not on auto-repeats).</summary>
+        event EventHandler? SpeechHotkeyPressed;
+
+        /// <summary>Raised on the hook thread when the speech hotkey is released.</summary>
+        event EventHandler? SpeechHotkeyReleased;
 
         /// <summary>Raised on a worker thread when the hook cannot start or stops with an error.</summary>
         event EventHandler<Exception>? HookFailed;
