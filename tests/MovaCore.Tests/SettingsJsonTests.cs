@@ -94,6 +94,14 @@ namespace MovaCore.Tests
             Assert.Equal(CopyPasteKeys.CtrlCV, settings.CopyPasteKeys);
             Assert.Empty(settings.ExcludedProcesses);
             Assert.Equal(UiLanguage.Auto, settings.Language);
+            Assert.False(settings.SpeechEnabled);
+            Assert.Equal(new Hotkey(KeyCode.VcScrollLock, HotkeyModifiers.None), settings.SpeechHotkey);
+            Assert.Equal("large-v3-turbo-q8_0", settings.SpeechModel);
+            Assert.Equal("", settings.SpeechCustomModelPath);
+            Assert.Equal("auto", settings.SpeechLanguage);
+            Assert.Null(settings.SpeechMicrophoneId);
+            Assert.True(settings.SpeechUseGpu);
+            Assert.True(settings.SpeechShowOverlay);
         }
 
         private static AppSettings NonDefaultSettings() => new()
@@ -109,6 +117,15 @@ namespace MovaCore.Tests
             CopyPasteKeys = CopyPasteKeys.CtrlInsertShiftInsert,
             ExcludedProcesses = new List<string> { "devenv", "Code" },
             Language = UiLanguage.Ukrainian,
+            SpeechEnabled = true,
+            SpeechKey = KeyCode.VcF9,
+            SpeechModifiers = HotkeyModifiers.Alt,
+            SpeechModel = "custom",
+            SpeechCustomModelPath = @"D:\models\ggml-large-v3-turbo.bin",
+            SpeechLanguage = "uk",
+            SpeechMicrophoneId = "{0.0.1.00000000}.{a1b2c3}",
+            SpeechUseGpu = false,
+            SpeechShowOverlay = false,
         };
 
         [Fact]
@@ -132,6 +149,14 @@ namespace MovaCore.Tests
             Assert.Equal(new[] { "devenv", "Code" }, restored.ExcludedProcesses);
             Assert.Equal(UiLanguage.Ukrainian, restored.Language);
             Assert.Equal(new Hotkey(KeyCode.VcScrollLock, HotkeyModifiers.Control | HotkeyModifiers.Shift), restored.Trigger);
+            Assert.True(restored.SpeechEnabled);
+            Assert.Equal(new Hotkey(KeyCode.VcF9, HotkeyModifiers.Alt), restored.SpeechHotkey);
+            Assert.Equal("custom", restored.SpeechModel);
+            Assert.Equal(@"D:\models\ggml-large-v3-turbo.bin", restored.SpeechCustomModelPath);
+            Assert.Equal("uk", restored.SpeechLanguage);
+            Assert.Equal("{0.0.1.00000000}.{a1b2c3}", restored.SpeechMicrophoneId);
+            Assert.False(restored.SpeechUseGpu);
+            Assert.False(restored.SpeechShowOverlay);
         }
 
         // Guards the round trip above: a property added to AppSettings must get a non-default value there
@@ -210,6 +235,20 @@ namespace MovaCore.Tests
             Assert.Contains("TriggerModifiers", names);
             Assert.Equal("VcF9", document.RootElement.GetProperty("TriggerKey").GetString());
             Assert.Equal("Alt", document.RootElement.GetProperty("TriggerModifiers").GetString());
+        }
+
+        [Fact]
+        public void SpeechHotkeyHelper_IsNotWrittenToJson()
+        {
+            var settings = new AppSettings { SpeechHotkey = new Hotkey(KeyCode.VcF8, HotkeyModifiers.Control) };
+
+            string json = JsonSerializer.Serialize(settings, SettingsJsonContext.Default.AppSettings);
+
+            using JsonDocument document = JsonDocument.Parse(json);
+            List<string> names = document.RootElement.EnumerateObject().Select(p => p.Name).ToList();
+            Assert.DoesNotContain("SpeechHotkey", names);
+            Assert.Equal("VcF8", document.RootElement.GetProperty("SpeechKey").GetString());
+            Assert.Equal("Control", document.RootElement.GetProperty("SpeechModifiers").GetString());
         }
 
         [Fact]

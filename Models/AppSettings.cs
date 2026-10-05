@@ -33,6 +33,29 @@ namespace MovaCore.Models
 
         public UiLanguage Language { get; set; } = UiLanguage.Auto;
 
+        /// <summary>Hold-to-talk dictation; off until the user turns it on, since it needs a speech model.</summary>
+        public bool SpeechEnabled { get; set; } = false;
+
+        public KeyCode SpeechKey { get; set; } = KeyCode.VcScrollLock;
+        public HotkeyModifiers SpeechModifiers { get; set; } = HotkeyModifiers.None;
+
+        /// <summary>A <see cref="Services.SpeechModelCatalog"/> id, or "custom" for <see cref="SpeechCustomModelPath"/>.</summary>
+        public string SpeechModel { get; set; } = Services.SpeechModelCatalog.DefaultId;
+
+        public string SpeechCustomModelPath { get; set; } = "";
+
+        /// <summary>A Whisper language code, e.g. "uk", or "auto" to detect it.</summary>
+        public string SpeechLanguage { get; set; } = SpeechLanguages.Auto;
+
+        /// <summary>The Windows audio endpoint ID of the microphone; null for the Windows default.</summary>
+        public string? SpeechMicrophoneId { get; set; }
+
+        /// <summary>Transcribe on the GPU through Vulkan where available (x64 only).</summary>
+        public bool SpeechUseGpu { get; set; } = true;
+
+        /// <summary>Show the small recording indicator near the bottom of the screen.</summary>
+        public bool SpeechShowOverlay { get; set; } = true;
+
         [JsonIgnore]
         public Hotkey Trigger
         {
@@ -41,6 +64,17 @@ namespace MovaCore.Models
             {
                 TriggerKey = value.Key;
                 TriggerModifiers = value.Modifiers;
+            }
+        }
+
+        [JsonIgnore]
+        public Hotkey SpeechHotkey
+        {
+            get => new(SpeechKey, SpeechModifiers);
+            set
+            {
+                SpeechKey = value.Key;
+                SpeechModifiers = value.Modifiers;
             }
         }
     }
