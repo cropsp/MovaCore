@@ -15,11 +15,12 @@ namespace MovaCore.Services
 
         private const string BaseUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/";
 
-        // In display order. Hashes are those listed in whisper.cpp's models/README.md; q8_0 has none there, so its
-        // download is checked against the SHA-256 that Hugging Face reports.
+        // In display order. SHA-1 hashes are those listed in whisper.cpp's models/README.md; q8_0 has none there, so its
+        // SHA-256 is the one Hugging Face reports for the file (X-Linked-Etag, recorded by the CI smoke test).
         public static IReadOnlyList<SpeechModelInfo> Models { get; } = new[]
         {
-            new SpeechModelInfo(DefaultId, "ggml-large-v3-turbo-q8_0.bin", 874_200_000, null),
+            new SpeechModelInfo(DefaultId, "ggml-large-v3-turbo-q8_0.bin", 874_188_075, null,
+                "317eb69c11673c9de1e1f0d459b253999804ec71ac4c23c17ecf5fbe24e259a1"),
             new SpeechModelInfo("large-v3-turbo", "ggml-large-v3-turbo.bin", 1_624_600_000, "4af2b29d7ec73d781377bfd1758ca957a807e941"),
             new SpeechModelInfo("large-v3-turbo-q5_0", "ggml-large-v3-turbo-q5_0.bin", 573_600_000, "e050f7970618a659205450ad97eb95a18d69c9ee"),
         };

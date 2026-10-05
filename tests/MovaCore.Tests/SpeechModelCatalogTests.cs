@@ -26,11 +26,17 @@ namespace MovaCore.Tests
             Assert.DoesNotContain(SpeechModelCatalog.Models, m => m.Id == SpeechModelCatalog.CustomId);
         }
 
+        // Every catalog model is checked against a pinned hash, not only against what the server says
         [Fact]
-        public void KnownHashes_AreSha1()
+        public void EveryModel_HasAPinnedHash()
         {
-            foreach (SpeechModelInfo model in SpeechModelCatalog.Models.Where(m => m.Sha1 != null))
-                Assert.Matches("^[0-9a-f]{40}$", model.Sha1);
+            foreach (SpeechModelInfo model in SpeechModelCatalog.Models)
+            {
+                if (model.Sha1 != null)
+                    Assert.Matches("^[0-9a-f]{40}$", model.Sha1);
+                else
+                    Assert.Matches("^[0-9a-f]{64}$", model.Sha256);
+            }
         }
 
         [Fact]

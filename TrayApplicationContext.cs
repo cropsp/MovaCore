@@ -113,8 +113,14 @@ namespace MovaCore
                 s.SpeechMicrophoneId,
                 s.RestoreClipboard));
 
-            // Turning dictation on downloads the chosen model (and resumes an interrupted download at startup)
-            if (s.SpeechEnabled && SpeechModelCatalog.Selected(s.SpeechModel) is { } model) _downloads.Start(model);
+            // Turning dictation on downloads the chosen model (and resumes an interrupted download at startup), unless
+            // the user has just cancelled that download in the settings
+            ModelDownloadState download = _downloads.State;
+            if (s.SpeechEnabled && SpeechModelCatalog.Selected(s.SpeechModel) is { } model
+                && !(download.Status == ModelDownloadStatus.Cancelled && download.ModelId == model.Id))
+            {
+                _downloads.Start(model);
+            }
         }
 
         private void ApplyLanguage()
@@ -318,56 +324,64 @@ namespace MovaCore
                 return;
             }
 
-            // No dictation while the settings are open: its hotkey may be about to change
+            // No dictation while the settings are open: its hotkey may be about to change. A recording in progress is
+            // dropped; a transcription finishes and pastes as usual.
             _hotkeyService.SetSpeechHotkey(null);
-            _speech.Cancel();
-
-            using (var form = new SettingsForm(
-                _currentSettings, ct => _hotkeyService.CaptureHotkeyAsync(ct), _recorder.GetInputDevices(), _downloads))
+            if (_speechState == SpeechState.Recording) _speech.Cancel();
+            try
             {
-                _settingsForm = form;
-                // Pausing or resuming while a hotkey is being recorded would leave the hook in the wrong state
-                _pauseItem?.Enabled = false;
+                ShowSettingsDialog();
+            }
+            finally
+            {
+                // Back as it was if the settings were not saved (ApplySettings has set it otherwise)
+                _hotkeyService.SetSpeechHotkey(_currentSettings.SpeechEnabled ? _currentSettings.SpeechHotkey : null);
+            }
+        }
 
-                DialogResult result;
-                try
-                {
-                    result = form.ShowDialog();
-                }
-                finally
-                {
-                    _settingsForm = null;
-                    _pauseItem?.Enabled = true;
-                    // Back as it was; saved settings are applied below
-                    _hotkeyService.SetSpeechHotkey(_currentSettings.SpeechEnabled ? _currentSettings.SpeechHotkey : null);
-                }
+        private void ShowSettingsDialog()
+        {
+            using var form = new SettingsForm(
+                _currentSettings, ct => _hotkeyService.CaptureHotkeyAsync(ct), _recorder.GetInputDevices(), _downloads);
+            _settingsForm = form;
+            // Pausing or resuming while a hotkey is being recorded would leave the hook in the wrong state
+            _pauseItem?.Enabled = false;
 
-                if (result == DialogResult.OK && form.UpdatedSettings is { } updatedSettings)
-                {
-                    _currentSettings = updatedSettings;
-                    ApplySettings();
-                    ApplyLanguage();
+            DialogResult result;
+            try
+            {
+                result = form.ShowDialog();
+            }
+            finally
+            {
+                _settingsForm = null;
+                _pauseItem?.Enabled = true;
+            }
 
-                    try
-                    {
-                        _settingsService.Save(_currentSettings);
-                    }
-                    catch (Exception ex)
-                    {
-                        AppLog.Error("Could not save settings", ex);
-                        MessageBox.Show(
-                            Strings.SettingsNotSaved(ex.Message),
-                            AppName,
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Error);
-                        return;
-                    }
+            if (result != DialogResult.OK || form.UpdatedSettings is not { } updatedSettings) return;
 
-                    if (_currentSettings.ShowNotifications)
-                    {
-                        _notifyIcon.ShowBalloonTip(2000, AppName, Strings.BalloonSettingsSaved, ToolTipIcon.Info);
-                    }
-                }
+            _currentSettings = updatedSettings;
+            ApplySettings();
+            ApplyLanguage();
+
+            try
+            {
+                _settingsService.Save(_currentSettings);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Error("Could not save settings", ex);
+                MessageBox.Show(
+                    Strings.SettingsNotSaved(ex.Message),
+                    AppName,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return;
+            }
+
+            if (_currentSettings.ShowNotifications)
+            {
+                _notifyIcon.ShowBalloonTip(2000, AppName, Strings.BalloonSettingsSaved, ToolTipIcon.Info);
             }
         }
 

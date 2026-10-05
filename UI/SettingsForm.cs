@@ -118,7 +118,6 @@ namespace MovaCore.UI
             AddPage(Strings.TabVoice, CreateVoicePage(microphones));
             AddPage(Strings.TabGeneral, CreateGeneralGroup(), CreateExcludedGroup());
             _tabs.Margin = new Padding(0, 0, 0, 10);
-            FitTabsToPages();
 
             TableLayoutPanel root = CreatePanel(new ColumnStyle(SizeType.AutoSize));
             AddRow(root, CreateHeader());
@@ -126,7 +125,7 @@ namespace MovaCore.UI
             AddRow(root, CreateButtons());
             Controls.Add(root);
 
-            UpdateVoiceControls();
+            FitTabsToPages(); // also applies UpdateVoiceControls
             ResumeLayout(false);
             // Size the form now, so that StartPosition.CenterScreen centers its final size
             PerformLayout();
@@ -145,22 +144,52 @@ namespace MovaCore.UI
             _tabs.TabPages.Add(page);
         }
 
-        // A TabControl does not size itself: make it as large as the largest page, plus its own frame and tab strip
+        // A TabControl does not size itself: make it as large as the largest page, plus its own frame and tab strip.
+        // The Voice page is measured with every optional row shown and its longest status text, so that nothing it
+        // shows later is cut off.
         private void FitTabsToPages()
         {
+            foreach (Control optional in new Control[] { _customModelRow, _whereToGetLink, _modelProgress, _modelActionButton })
+                optional.Visible = true;
+            _modelStatusLabel.Text = LongestModelStatus();
+
             var largest = Size.Empty;
             foreach (TableLayoutPanel page in _pages)
             {
                 Size preferred = page.GetPreferredSize(Size.Empty);
                 largest = new Size(Math.Max(largest.Width, preferred.Width), Math.Max(largest.Height, preferred.Height));
             }
-            largest += new Size(16, 16); // the page content's margin on each side
+            UpdateVoiceControls(); // back to what the settings show
+
+            // The same margin on the far sides as the content's offset (scaled with the DPI)
+            Point offset = _pages[0].Location;
+            largest += new Size(2 * offset.X, 2 * offset.Y);
 
             // DisplayRectangle needs the handle; before it exists, estimate the frame from the font
             Size frame = _tabs.IsHandleCreated
                 ? _tabs.Size - _tabs.DisplayRectangle.Size
                 : new Size(8, Font.Height + 16);
             _tabs.Size = largest + frame;
+        }
+
+        private static string LongestModelStatus()
+        {
+            var candidates = new List<string>
+            {
+                Strings.SpeechModelNotDownloaded(Strings.FormatSize(1_624_600_000)),
+                Strings.SpeechModelDownloading(Strings.FormatSize(1_624_600_000), Strings.FormatSize(1_624_600_000), 100),
+                Strings.SpeechCustomGguf,
+                Strings.SpeechCustomNone,
+            };
+            foreach (ModelDownloadError error in Enum.GetValues<ModelDownloadError>())
+                candidates.Add(Strings.SpeechModelDownloadFailed(Strings.DownloadErrorText(error)));
+
+            string longest = "";
+            foreach (string candidate in candidates)
+            {
+                if (candidate.Length > longest.Length) longest = candidate;
+            }
+            return longest;
         }
 
         protected override void OnLoad(EventArgs e)
@@ -694,8 +723,10 @@ namespace MovaCore.UI
                 SpeechCustomModelPath = _customModelPath,
                 SpeechLanguage = SpeechLanguages.Codes[Math.Max(_speechLanguageComboBox.SelectedIndex, 0)],
                 SpeechMicrophoneId = _microphoneIds[Math.Max(_microphoneComboBox.SelectedIndex, 0)],
-                // Kept as it was on ARM, where the box is disabled
-                SpeechUseGpu = _useGpuCheckBox.Enabled ? _useGpuCheckBox.Checked : _settings.SpeechUseGpu,
+                // Kept as it was on ARM, where the box is always disabled
+                SpeechUseGpu = RuntimeInformation.ProcessArchitecture == Architecture.Arm64
+                    ? _settings.SpeechUseGpu
+                    : _useGpuCheckBox.Checked,
                 SpeechShowOverlay = _overlayCheckBox.Checked,
             };
         }

@@ -271,14 +271,10 @@ namespace MovaCore
 
         private static async Task CheckSpeechRecognitionAsync(string? modelPath, string? audioPath)
         {
+            // CI runners have AVX2: CpuUnsupported there means the processor check is wrong
             try
             {
                 AppLog.Info("Smoke test: speech runtime " + WhisperSpeechRecognizer.LoadRuntime(useGpu: true));
-            }
-            catch (SpeechException ex) when (ex.Error == SpeechError.CpuUnsupported)
-            {
-                AppLog.Info($"Smoke test: speech recognition not checked: {ex.Message}");
-                return;
             }
             catch (SpeechException ex)
             {

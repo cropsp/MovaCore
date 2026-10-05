@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Threading;
 using MovaCore.Models;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
@@ -16,6 +18,8 @@ namespace MovaCore.Services
     {
         private const int E_ACCESSDENIED = unchecked((int)0x80070005);
         private const int BufferMilliseconds = 100;
+        private static readonly TimeSpan StartTimeout = TimeSpan.FromSeconds(3);
+        private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(3);
 
         // A bit more than the orchestrator's time limit: a recording whose release was missed must not grow forever
         private const int MaxSamples = AudioSamples.SampleRate * 130;
@@ -28,6 +32,7 @@ namespace MovaCore.Services
         private WasapiRecorder? _recorder; // Start and Stop are called by one thread at a time
         private MMDevice? _device;
         private volatile float _level;
+        private volatile Exception? _captureError; // why NAudio's capture thread ended, if it failed
 
         public bool IsRecording => _recorder != null;
 
@@ -45,9 +50,13 @@ namespace MovaCore.Services
                     using (device) result.Add(new AudioInputDevice(device.ID, device.FriendlyName));
                 }
             }
-            catch (COMException ex)
+            catch (Exception ex)
             {
-                AppLog.Info($"Could not list the microphones: {ex.Message}");
+                // Without a microphone list the settings still open; only an unexpected kind of failure is a bug
+                if (ex is COMException or UnauthorizedAccessException)
+                    AppLog.Info($"Could not list the microphones: {ex.Message}");
+                else
+                    AppLog.Error("Could not list the microphones", ex);
             }
             return result;
         }
@@ -78,7 +87,17 @@ namespace MovaCore.Services
                 recorder.DataAvailable += OnDataAvailable;
                 recorder.RecordingStopped += OnRecordingStopped;
                 lock (_lock) _count = 0;
+                _captureError = null;
                 recorder.StartRecording();
+
+                // NAudio's capture thread sets Capturing after IAudioClient.Start, overwriting a stop requested in
+                // between, and then never ends: a quick release must not reach Stop before that
+                SpinWait.SpinUntil(() => recorder.CaptureState != CaptureState.Starting, StartTimeout);
+                if (recorder.CaptureState == CaptureState.Stopped)
+                {
+                    throw new COMException(_captureError?.Message ?? "The microphone did not start",
+                        _captureError?.HResult ?? 0);
+                }
             }
             catch (Exception ex) when (ex is COMException or UnauthorizedAccessException)
             {
@@ -97,8 +116,17 @@ namespace MovaCore.Services
             if (recorder == null) return Array.Empty<float>();
 
             _recorder = null;
-            // Dispose waits for the capture thread, so every buffer delivered before the stop is in
-            recorder.Dispose();
+            // Asked again until it has stopped (see Start), within a time limit: Dispose waits for the capture thread
+            var watch = Stopwatch.StartNew();
+            while (recorder.CaptureState != CaptureState.Stopped && watch.Elapsed < StopTimeout)
+            {
+                recorder.StopRecording();
+                Thread.Sleep(5);
+            }
+            if (recorder.CaptureState == CaptureState.Stopped)
+                recorder.Dispose(); // every buffer delivered before the stop is in now
+            else
+                AppLog.Error("The microphone did not stop in time"); // not disposed: that would wait forever
             _device?.Dispose();
             _device = null;
             _level = 0;
@@ -164,7 +192,9 @@ namespace MovaCore.Services
         private void OnRecordingStopped(object? sender, StoppedEventArgs e)
         {
             // E.g. the microphone was unplugged while recording; what was captured so far is still used
-            if (e.Exception != null) AppLog.Info($"The recording stopped early: {e.Exception.Message}");
+            if (e.Exception == null) return;
+            _captureError = e.Exception;
+            AppLog.Info($"The recording stopped early: {e.Exception.Message}");
         }
 
         public void Dispose()

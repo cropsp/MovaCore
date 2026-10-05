@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics.X86;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using MovaCore.Models;
@@ -20,7 +21,7 @@ namespace MovaCore.Services
     /// </summary>
     public sealed partial class WhisperSpeechRecognizer : ISpeechRecognizer
     {
-        private const int PF_AVX2_INSTRUCTIONS_AVAILABLE = 40;
+        private const ulong XSTATE_MASK_AVX = 1UL << 2;
 
         // Load order of a runtime folder: dependencies first, as Whisper.net does it
         private static readonly string[] RuntimeFiles =
@@ -61,8 +62,11 @@ namespace MovaCore.Services
                 {
                     WhisperProcessor processor = EnsureLoaded(options);
                     var segments = new List<string>();
-                    await foreach (SegmentData segment in processor.ProcessAsync(samples, cancellationToken))
-                        segments.Add(segment.Text);
+                    // Unlike ProcessAsync, which gives up on cancellation while whisper.cpp still runs, this completes
+                    // only after the native call has returned: the lock must cover it, or the model could be freed
+                    // underneath it
+                    await processor.ProcessWithUtf8HandlerAsync(
+                        samples, segment => segments.Add(Encoding.UTF8.GetString(segment.TextUtf8)), cancellationToken);
                     return (IReadOnlyList<string>)segments;
                 }
                 finally
@@ -144,9 +148,16 @@ namespace MovaCore.Services
 
         private void Free()
         {
-            _processor?.Dispose();
+            try
+            {
+                _processor?.Dispose();
+                _factory?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                AppLog.Error("Could not free the speech model", ex);
+            }
             _processor = null;
-            _factory?.Dispose();
             _factory = null;
             _loadedModel = null;
         }
@@ -199,16 +210,21 @@ namespace MovaCore.Services
 
         /// <summary>
         /// Under Native AOT, Avx2.IsSupported reflects the compile-time baseline instead of this processor, so ask
-        /// Windows (which also checks that the OS saves the AVX registers) and CPUID.
+        /// CPUID, and Windows whether it saves the AVX registers on a context switch.
         /// </summary>
         private static bool CpuSupportsWhisper()
         {
-            if (!IsProcessorFeaturePresent(PF_AVX2_INSTRUCTIONS_AVAILABLE)) return false;
+            (int maxLeaf, _, _, _) = X86Base.CpuId(0, 0);
+            if (maxLeaf < 7) return false;
 
             (_, _, int ecx, _) = X86Base.CpuId(1, 0);
+            (_, int ebx7, _, _) = X86Base.CpuId(7, 0);
             bool fma = (ecx & (1 << 12)) != 0;
+            bool osxsave = (ecx & (1 << 27)) != 0;
+            bool avx = (ecx & (1 << 28)) != 0;
             bool f16c = (ecx & (1 << 29)) != 0;
-            return fma && f16c;
+            bool avx2 = (ebx7 & (1 << 5)) != 0;
+            return fma && avx && f16c && avx2 && osxsave && (GetEnabledXStateFeatures() & XSTATE_MASK_AVX) != 0;
         }
 
         // whisper.cpp reports loading details at Info level; warnings and errors help when a model does not load.
@@ -224,10 +240,11 @@ namespace MovaCore.Services
             // A transcription still running uses the model: freeing it underneath would crash
             if (!_lock.Wait(TimeSpan.FromSeconds(3))) return;
             Free();
+            _lock.Release();
         }
 
+        // The XSAVE features Windows enables (Windows 7 SP1 and later)
         [LibraryImport("kernel32.dll")]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static partial bool IsProcessorFeaturePresent(int processorFeature);
+        private static partial ulong GetEnabledXStateFeatures();
     }
 }

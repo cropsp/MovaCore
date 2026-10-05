@@ -106,14 +106,19 @@ jobs:
         if: matrix.rid == 'win-x64'
         shell: powershell
         run: |
+          # Written under another name first: a failed Speak would leave an empty file behind
+          $wave = "$PWD\smoke-model\hello.wav"
           try {
             Add-Type -AssemblyName System.Speech
             $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
             $format = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(16000, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono)
-            $synth.SetOutputToWaveFile("$PWD\smoke-model\hello.wav", $format)
+            $synth.SetOutputToWaveFile("$wave.tmp", $format)
             $synth.Speak('Hello world. This is a test of the speech recognition.')
             $synth.Dispose()
+            if ((Get-Item "$wave.tmp").Length -lt 16000) { throw 'The recording is empty' }
+            Move-Item "$wave.tmp" $wave -Force
           } catch {
+            Remove-Item "$wave.tmp" -ErrorAction SilentlyContinue
             Write-Warning "No speech synthesizer on this runner, the transcription is checked with a tone: $_"
           }
 

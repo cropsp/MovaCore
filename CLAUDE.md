@@ -113,7 +113,8 @@ Dictation (hold-to-talk) reuses the hook, the clipboard service and the paste:
   and on x64 only after an AVX2/FMA/F16C check (ggml's CPU code dies with an illegal instruction without them).
 - **`Services/ModelDownloader.cs`** is the only network code: it downloads a `SpeechModelCatalog` model from
   Hugging Face into `<file>.partial` (range requests resume it), follows redirects by hand to read the SHA-256 in
-  `X-Linked-Etag`, checks size, hash (catalog SHA-1 where known) and the ggml magic (`SpeechModelFile`).
+  `X-Linked-Etag`, checks size, hash (pinned in the catalog: whisper.cpp's SHA-1, or for q8_0 the SHA-256 recorded from Hugging Face)
+  and the ggml magic (`SpeechModelFile`).
   `ModelDownloadManager` runs one download in the background; enabling dictation starts it (and startup resumes it).
 - `TrayApplicationContext` swaps the tray icon (red/amber dot) and drives `UI/RecordingOverlay.cs`, a click-through
   window that never takes the focus (`WS_EX_NOACTIVATE`, `ShowWithoutActivation`). Errors the user can fix
@@ -157,7 +158,9 @@ file appears. The app csproj excludes `tests/**` from its default globs because 
   under AOT.
 - WinForms is not officially AOT-supported: `_SuppressWinFormsTrimError` forces the publish, and ILC warnings (all
   from WinForms today) are kept non-fatal with `IlcTreatWarningsAsErrors=false`. A new IL warning naming MovaCore,
-  SharpHook, NAudio, Whisper.net or System.Net in the CI summary is a real problem. A clean `dotnet build` proves nothing about the published exe;
+  SharpHook, NAudio, Whisper.net or System.Net in the CI summary is a real problem. The one known exception is IL3000
+  in Whisper.net's `NativeLibraryLoader` (`Assembly.Location` is empty under AOT); it then probes
+  `AppDomain.BaseDirectory`, which is the exe's folder. A clean `dotnet build` proves nothing about the published exe;
   verify UI paths against the AOT-published binary.
 - WinForms and Native AOT are verified only by running the published exe (`--smoke-test`, run by CI). When you touch
   UI, resources, P/Invoke or DI registration, extend `SmokeTest.cs` if the new path is not exercised.

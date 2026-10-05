@@ -82,7 +82,10 @@ namespace MovaCore.Services
                     }
                     else if (response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable && existing > 0 && attempt == 0)
                     {
-                        // The partial file is complete already or does not match the remote file: start over once
+                        // Nothing left to download: the partial file is complete (the app stopped before renaming it)
+                        // or does not belong to the remote file, in which case it starts over once
+                        if (linkedSize == existing && await IsCompleteAsync(model, partialPath, sha256, cancellationToken))
+                            break;
                         DeleteQuietly(partialPath);
                         continue;
                     }
@@ -147,9 +150,17 @@ namespace MovaCore.Services
                 if (response.StatusCode is not (HttpStatusCode.OK or HttpStatusCode.PartialContent))
                     throw new ModelDownloadException(ModelDownloadError.Server, $"HTTP {(int)response.StatusCode} from {url.Host}");
 
-                await using Stream body = await response.Content.ReadAsStreamAsync(cancellationToken);
                 var prefix = new byte[length];
-                int read = await WithStallTimeout(t => body.ReadAtLeastAsync(prefix, length, false, t).AsTask(), cancellationToken);
+                int read;
+                try
+                {
+                    await using Stream body = await response.Content.ReadAsStreamAsync(cancellationToken);
+                    read = await WithStallTimeout(t => body.ReadAtLeastAsync(prefix, length, false, t).AsTask(), cancellationToken);
+                }
+                catch (Exception ex) when (ex is IOException or HttpRequestException)
+                {
+                    throw new ModelDownloadException(ModelDownloadError.Network, ex.Message, ex);
+                }
                 return new RemoteFileProbe(prefix[..read], sha256, size ?? response.Content.Headers.ContentRange?.Length);
             }
         }
@@ -271,21 +282,31 @@ namespace MovaCore.Services
             }
         }
 
-        /// <summary>The known SHA-1 if the catalog has one, otherwise the SHA-256 reported by the server, if any.</summary>
-        private static IncrementalHash? CreateHash(SpeechModelInfo model, string? sha256, out string? expected)
+        /// <summary>The catalog's hash if it has one, otherwise the SHA-256 reported by the server, if any.</summary>
+        private static IncrementalHash? CreateHash(SpeechModelInfo model, string? reportedSha256, out string? expected)
         {
             if (model.Sha1 != null)
             {
                 expected = model.Sha1.ToLowerInvariant();
                 return IncrementalHash.CreateHash(HashAlgorithmName.SHA1);
             }
-            if (sha256 != null)
+            if ((model.Sha256 ?? reportedSha256) is { } sha256)
             {
-                expected = sha256;
+                expected = sha256.ToLowerInvariant();
                 return IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             }
             expected = null;
             return null;
+        }
+
+        private static async Task<bool> IsCompleteAsync(
+            SpeechModelInfo model, string path, string? reportedSha256, CancellationToken cancellationToken)
+        {
+            using IncrementalHash? hash = CreateHash(model, reportedSha256, out string? expected);
+            if (hash == null) return false;
+
+            await HashFileAsync(path, hash, cancellationToken);
+            return string.Equals(Convert.ToHexStringLower(hash.GetHashAndReset()), expected, StringComparison.Ordinal);
         }
 
         private static async Task HashFileAsync(string path, IncrementalHash hash, CancellationToken cancellationToken)

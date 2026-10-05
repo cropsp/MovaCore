@@ -38,7 +38,7 @@ namespace MovaCore.Tests
         private static string Sha1(byte[] data) => Convert.ToHexStringLower(SHA1.HashData(data));
         private static string Sha256(byte[] data) => Convert.ToHexStringLower(SHA256.HashData(data));
 
-        private SpeechModelInfo Model(string? sha1 = null) => new("test", FileName, 300_000, sha1);
+        private SpeechModelInfo Model(string? sha1 = null, string? sha256 = null) => new("test", FileName, 300_000, sha1, sha256);
 
         private ModelDownloader Downloader(Func<string, long?>? freeSpace = null) => new(_http)
         {
@@ -118,6 +118,42 @@ namespace MovaCore.Tests
             Assert.Equal(_content, File.ReadAllBytes(Destination));
             Assert.All(_http.Requests, r => Assert.Equal(100_000, r.Headers.Range?.Ranges.Single().From));
             Assert.Equal(100_000, _progress[0].BytesReceived);
+        }
+
+        // A pinned hash wins over what the server says: a tampered or wrong file is caught even if the header matches it
+        [Fact]
+        public async Task CatalogSha256_IsPreferredOverTheReportedOne()
+        {
+            ServeLikeHuggingFace(_content);
+
+            var error = await Assert.ThrowsAsync<ModelDownloadException>(() => DownloadAsync(Model(sha256: new string('b', 64))));
+
+            Assert.Equal(ModelDownloadError.Corrupt, error.Error);
+        }
+
+        [Fact]
+        public async Task CatalogSha256_Matching_IsAccepted()
+        {
+            ServeLikeHuggingFace(_content, sha256: new string('c', 64));
+
+            await DownloadAsync(Model(sha256: Sha256(_content)));
+
+            Assert.Equal(_content, File.ReadAllBytes(Destination));
+        }
+
+        // The download finished but the app stopped before renaming the file: it is kept, not downloaded again
+        [Fact]
+        public async Task CompletePartialFile_IsFinishedWithoutDownloadingAgain()
+        {
+            Directory.CreateDirectory(_directory);
+            File.WriteAllBytes(Partial, _content);
+            ServeLikeHuggingFace(_content);
+
+            await DownloadAsync(Model());
+
+            Assert.Equal(_content, File.ReadAllBytes(Destination));
+            Assert.False(File.Exists(Partial));
+            Assert.Equal(2, _http.Requests.Count); // the redirect and the unsatisfiable range, no full download
         }
 
         [Fact]
@@ -260,6 +296,20 @@ namespace MovaCore.Tests
             Assert.Equal(4095, _http.Requests[^1].Headers.Range?.Ranges.Single().To);
         }
 
+        [Fact]
+        public async Task Probe_BrokenConnection_IsANetworkError()
+        {
+            _http.Route(HuggingFaceUrl, _ => new HttpResponseMessage(HttpStatusCode.PartialContent)
+            {
+                Content = new StreamContent(new FailingStream()),
+            });
+
+            var error = await Assert.ThrowsAsync<ModelDownloadException>(
+                () => Downloader().ProbeAsync(new Uri(HuggingFaceUrl), 4096, CancellationToken.None));
+
+            Assert.Equal(ModelDownloadError.Network, error.Error);
+        }
+
         [Theory]
         [InlineData("\"ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789\"", "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")]
         [InlineData("W/\"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\"", "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")]
@@ -279,6 +329,15 @@ namespace MovaCore.Tests
             public SyncProgress(List<ModelDownloadProgress> reports) => _reports = reports;
 
             public void Report(ModelDownloadProgress value) => _reports.Add(value);
+        }
+
+        private sealed class FailingStream : MemoryStream
+        {
+            public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+                throw new IOException("The connection was reset");
+
+            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+                throw new IOException("The connection was reset");
         }
     }
 }
