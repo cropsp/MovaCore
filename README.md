@@ -13,6 +13,19 @@ It also types what you say: hold a key, speak, and the text appears where you ar
 
 ---
 
+## 🆕 New: voice input (coming in 1.2)
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/mouse-in-grass-dark.gif">
+    <img src="docs/media/mouse-in-grass-light.gif" width="420" alt="The dictation indicator: a field mouse dozes until the microphone is ready, sits in grass that grows with your voice, gnaws an ear of wheat while the speech is recognized and winks when the text is pasted">
+  </picture>
+</p>
+
+Hold **ScrollLock**, speak, and let go: MovaCore recognizes what you said with Whisper, right on your PC, and types it where your cursor is. While you speak, our field mouse sits in grass that grows with your voice; it gnaws an ear of wheat while the text is recognized and winks when it is pasted. Nothing you say leaves your computer. [How to set it up](#voice-input).
+
+---
+
 ## ✨ Features
 
 - **Blazing Fast:** Built with **.NET 10 & Native AOT**, ensuring instant startup and no .NET installation required.
