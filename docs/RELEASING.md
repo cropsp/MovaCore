@@ -12,10 +12,18 @@
    ```
 
 4. CI checks that the tag matches `<Version>`, packages `MovaCore-vX.Y.Z-win-x64.zip` and `-win-arm64.zip`
-   (`MovaCore.exe`, `uiohook.dll`, `LICENSE`) with `SHA256SUMS.txt`, and creates a **draft** release whose notes are
-   the version's `CHANGELOG.md` section plus installation instructions.
+   (`MovaCore.exe`, `uiohook.dll`, the `runtimes` folder with the Whisper runtimes and their VC++ runtime, `LICENSE`,
+   `THIRD-PARTY-NOTICES.txt`) with `SHA256SUMS.txt`, and creates a **draft** release whose notes are the version's
+   `CHANGELOG.md` section plus installation instructions.
 5. Before publishing the draft, try the x64 zip on a real Windows machine: extract it, convert a selection in a
    couple of applications, press the hotkey again to convert back, open Settings, and exit from the tray.
+   Then dictation, which CI cannot try with a real microphone or graphics card:
+   - turn voice input on: the model downloads (tray tooltip, Voice tab); exit halfway and start again: it resumes;
+   - hold the dictation hotkey and speak in Notepad, a browser and Telegram: the text is pasted, the clipboard comes
+     back, the indicator never takes the focus;
+   - with the graphics card option on and off (restart in between; the log names the runtime);
+   - a short tap and silence paste nothing; Pause while holding the hotkey cancels;
+   - a GGUF file as the custom model is refused with a clear message.
 6. Publish the draft.
 
 The executables are not code-signed yet, so Windows SmartScreen may warn on first start.

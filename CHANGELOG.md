@@ -5,6 +5,22 @@ All notable changes to MovaCore are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Voice input: hold the dictation hotkey (ScrollLock by default), speak and release, and the speech is recognized
+  locally with Whisper and pasted into the focused application; the clipboard is restored afterwards. Settings:
+  language, microphone, graphics card (Vulkan, x64) and the recording indicator.
+- Turning voice input on downloads the speech model (Whisper Large v3 Turbo q8_0, 874 MB; the full-precision and a
+  smaller variant can be chosen, or a whisper.cpp model file of your own) in the background, checks it against its
+  hash and resumes an interrupted download at the next start. This is the only network connection MovaCore makes.
+- While dictating, the tray icon shows a red dot (amber while recognizing), and a small indicator at the bottom of the
+  screen shows the microphone level without taking the focus.
+
+### Changed
+- The settings window has tabs: Layout, Voice and General. Restoring the clipboard and the copy and paste keys moved
+  to General, since they apply to dictation too.
+- The release archives contain a `runtimes` folder (speech recognition, with the Visual C++ runtime it needs) and
+  `THIRD-PARTY-NOTICES.txt`; the x64 archive is larger mostly because of the Vulkan build of whisper.cpp.
+
 ## [1.1.0] - 2026-10-01
 
 ### Fixed

@@ -5,9 +5,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 MovaCore is a Windows-only system-tray utility that converts selected text typed in the wrong keyboard layout
-(EN ↔ UA, e.g. `ghbdsn` → `привіт`) when the user presses a global hotkey (default F10). It is written in C# on
-.NET 10 WinForms and shipped as a Native AOT `MovaCore.exe` plus SharpHook's native `uiohook.dll`, which Native AOT
-cannot embed, so releases are zip archives. The root namespace is `MovaCore`.
+(EN ↔ UA, e.g. `ghbdsn` → `привіт`) when the user presses a global hotkey (default F10). It also does hold-to-talk
+dictation: hold a second hotkey (default ScrollLock), speak, and the speech is recognized locally with Whisper and
+pasted. It is written in C# on .NET 10 WinForms and shipped as a Native AOT `MovaCore.exe` plus native libraries that
+Native AOT cannot embed (SharpHook's `uiohook.dll`, the Whisper runtimes in `runtimes\`), so releases are zip archives.
+The root namespace is `MovaCore`.
 
 A prioritized review of known bugs and the roadmap lives in `docs/IMPROVEMENT_PLAN.md` (in Ukrainian); check it
 before changing behaviour, since many "odd" things in the code are already catalogued there.
@@ -24,6 +26,7 @@ dotnet run --project MovaCore.csproj                   # run (appears only as a 
 dotnet publish MovaCore.csproj -c Release -r win-x64   # same as publish.ps1
 # output: bin/Release/net10.0-windows/win-x64/publish/ (MovaCore.exe + uiohook.dll)
 MovaCore.exe --smoke-test                              # exercise AOT-sensitive paths and exit (SmokeTest.cs)
+MovaCore.exe --smoke-test --smoke-test-model ggml-tiny.bin --smoke-test-audio hello.wav  # also transcribe (as CI)
 
 dotnet test tests/MovaCore.Tests/MovaCore.Tests.csproj                                       # all tests
 dotnet test tests/MovaCore.Tests/MovaCore.Tests.csproj --filter "FullyQualifiedName~HotkeyOrchestratorTests"  # one class
@@ -37,7 +40,9 @@ as environment variables). Either way the output is not runnable.
 
 CI (`.github/workflows/ci.yml`, Windows runners) is the only place the real app is built, AOT-published (x64 and
 arm64) and smoke-tested; its job summary lists the publish output sizes and the AOT/trim warnings (all currently from
-WinForms itself). Pushing a `v*` tag creates a draft release with zip archives and SHA256 sums; the tag must match
+WinForms itself). After publishing, `eng/copy-vc-runtime.ps1` copies the VC++ runtime next to the Whisper DLLs and
+`eng/check-native-deps.ps1` fails if any shipped binary imports a DLL a clean PC may lack (`publish.ps1` runs both
+too). The smoke test transcribes a synthesized "hello world" with the cached `ggml-tiny.bin`. Pushing a `v*` tag creates a draft release with zip archives and SHA256 sums; the tag must match
 `<Version>` in `MovaCore.csproj`, and the notes come from that version's `CHANGELOG.md` section
 (`docs/RELEASING.md`).
 
@@ -54,7 +59,8 @@ The conversion pipeline runs across these files:
 1. **`Services/HotkeyService.cs`** runs a keyboard-only SharpHook `SimpleGlobalHook` via `RunAsync` on a background
    thread. The trigger is a `Models/Hotkey` (key + exact modifiers, matched by `HotkeyMatching`); it suppresses both
    press and release of the trigger key and raises `HotkeyTriggered` on *release*, unless the foreground process is
-   in the excluded list. Hook callbacks run synchronously on the hook thread: `e.SuppressEvent` must be set there,
+   in the excluded list. The press/release decisions (auto-repeat, which hotkey a release belongs to, the speech
+   hotkey's `SpeechHotkeyPressed`/`SpeechHotkeyReleased`) live in the platform-neutral `HotkeyStateTracker`. Hook callbacks run synchronously on the hook thread: `e.SuppressEvent` must be set there,
    and handlers must return fast. Our own simulated events never count as the trigger. When the trigger includes Alt
    or Win, an unassigned key (VK 0xE8) is tapped so their release opens neither the app's menu nor Start; simulated
    shortcuts likewise press Ctrl *before* releasing held modifiers. `CaptureHotkeyAsync` records a new hotkey through
@@ -70,8 +76,8 @@ The conversion pipeline runs across these files:
    pasted text (single-line, ≤ 300 text elements) → switch the window's layout to the target language → restore the
    snapshot. With `ConvertLastWord` (off by default) an empty copy is retried after Ctrl+Shift+Left. If the sequence number does not change, nothing was selected and the clipboard is left alone. The
    snapshot is restored only after the paste is observed: restoring earlier would paste the old content instead.
-   A second hotkey press while a conversion runs is dropped (`Interlocked` busy flag). `ConversionFailed` reports
-   errors (a tray balloon) in addition to the log.
+   A second hotkey press while a conversion runs is dropped (`ClipboardGate.TryEnter`, shared with dictation).
+   `ConversionFailed` reports errors (a tray balloon) in addition to the log.
 4. **`Services/ClipboardService.cs`** is raw Win32 P/Invoke (`LibraryImport`), deliberately not
    `System.Windows.Forms.Clipboard` (COM/STA issues). A message-only `NativeWindow` created on the UI thread owns
    everything we put on the clipboard. Converted text is offered with *delayed rendering*, so the window gets
@@ -90,12 +96,39 @@ The conversion pipeline runs across these files:
    must stay the same length without duplicates; the constructor throws otherwise. It also switches the foreground
    window's layout (`WM_INPUTLANGCHANGEREQUEST`).
 
+Dictation (hold-to-talk) reuses the hook, the clipboard service and the paste:
+
+- **`Services/SpeechOrchestrator.cs`** (platform-neutral, tested) turns hotkey press/release into commands on one
+  `Channel` loop, so the hook thread never blocks and their order holds: press → `IAudioRecorder.Start` and a model
+  preload; release → stop, discard short (< 0.3 s) or silent recordings (`AudioSamples.IsSilent`: Whisper invents
+  text for silence), pad to 1.25 s, `ISpeechRecognizer.TranscribeAsync` beside the loop, `TranscriptText.Clean`,
+  then **`TextPaster`** (snapshot, set, Ctrl+V, wait for the read, restore; it waits for the `ClipboardGate`
+  instead of dropping the text). It enforces a 2-minute limit (a release during a UAC prompt is never seen), frees
+  the model after 10 idle minutes and reports `StateChanged` (state, outcome, `SpeechError`) on a worker thread.
+- **`Services/WasapiAudioRecorder.cs`** (Windows-only) records through NAudio's `WasapiRecorder` in shared mode with
+  AutoConvertPcm, so the audio engine delivers 16 kHz mono float; microphones are stored by endpoint ID.
+- **`Services/WhisperSpeechRecognizer.cs`** (Windows-only) wraps Whisper.net. Whisper.net caches its native load
+  result (even a failure) for the process, so the runtime is chosen and test-loaded here first and then forced
+  (`RuntimeOptions.ForcedRuntimeLibrary`): Vulkan if the GPU option is on and `vulkan-1.dll` loads, else the CPU,
+  and on x64 only after an AVX2/FMA/F16C check (ggml's CPU code dies with an illegal instruction without them).
+- **`Services/ModelDownloader.cs`** is the only network code: it downloads a `SpeechModelCatalog` model from
+  Hugging Face into `<file>.partial` (range requests resume it), follows redirects by hand to read the SHA-256 in
+  `X-Linked-Etag`, checks size, hash (catalog SHA-1 where known) and the ggml magic (`SpeechModelFile`).
+  `ModelDownloadManager` runs one download in the background; enabling dictation starts it (and startup resumes it).
+- `TrayApplicationContext` swaps the tray icon (red/amber dot) and drives `UI/RecordingOverlay.cs`, a click-through
+  window that never takes the focus (`WS_EX_NOACTIVATE`, `ShowWithoutActivation`). Errors the user can fix
+  (`SpeechException`: no model, no microphone, unsupported CPU…) are logged as Info, not Error; never log what was
+  said or the audio.
+
 Settings: `Services/SettingsService.cs` stores `Models/AppSettings` as JSON in `%APPDATA%\MovaCore\settings.json`
 (atomic write) and never shows UI; `Save` throws and the caller reports it. The Windows autostart entry
 (`HKCU\...\Run`) lives behind `IStartupRegistration` (`StartupRegistration.cs`) and is the source of truth for
 `LaunchAtStartup`; `Load` re-points it at the running exe only when the registered exe no longer exists.
 `UI/SettingsForm.cs` is built in code (no designer file) from auto-sizing `TableLayoutPanel`s with
-`AutoScaleMode.Dpi`; it records the hotkey through `IHotkeyService.CaptureHotkeyAsync`. The tray offers Settings, Pause
+`AutoScaleMode.Dpi`, on three tabs (Layout, Voice, General); a `TabControl` does not size itself, so
+`FitTabsToPages` sizes it from the largest page. Both hotkeys are recorded by `UI/HotkeyPicker` through
+`IHotkeyService.CaptureHotkeyAsync`, which refuses a combination the other hotkey uses. `OnSaveClick` builds a new
+`AppSettings`: a field it does not copy resets to its default. The tray offers Settings, Pause
 (stops the hook; not persisted), About and Exit, and only one settings window at a time.
 
 All user-visible text lives in `Strings.cs` (English and Ukrainian, chosen by `AppSettings.Language`, where `Auto`
@@ -104,15 +137,17 @@ Add new texts to `Strings` in both languages (`StringsTests` checks that none is
 `InvariantGlobalization`: WinForms builds a `CultureInfo` for the keyboard layout whenever the user switches layouts
 in one of our windows, and that throws in invariant mode.
 
-The tray icon, exe icon and settings logo are embedded resources (`AppResources.cs`) generated from
-`Resources/mouse_icon.png` by `eng/generate-icons.py`; regenerate them instead of editing the `.ico`/`.png` by hand.
+The tray icons (normal, recording, transcribing), exe icon and settings logo are embedded resources
+(`AppResources.cs`) generated from `Resources/mouse_icon.png` by `eng/generate-icons.py`; regenerate them instead of
+editing the `.ico`/`.png` by hand.
 
 One top-level type per file; interfaces live next to their implementations in `Services/`.
 
 Tests (`tests/MovaCore.Tests`, xUnit) cannot reference the WinForms app, so the csproj compiles the platform-neutral
-files in as linked sources (and `internal` members are visible to tests). `HotkeyService` and `ClipboardService` are
-Windows-only and are not linked: tests use fakes (`tests/MovaCore.Tests/Fakes.cs`), and the real Win32 behaviour is
-covered by the smoke test in CI. Keep WinForms/registry code out of linked files, and add a link when a new testable
+files in as linked sources (and `internal` members are visible to tests). `HotkeyService`, `ClipboardService`, `WasapiAudioRecorder`
+and `WhisperSpeechRecognizer` are Windows-only and are not linked: tests use fakes (`tests/MovaCore.Tests/Fakes.cs`,
+`SpeechFakes.cs` with a fake HTTP handler for the downloader), and the real behaviour is covered by the smoke test in
+CI. Keep WinForms/registry code out of linked files, and add a link when a new testable
 file appears. The app csproj excludes `tests/**` from its default globs because the app project sits at the root.
 
 ## Native AOT constraints
@@ -121,12 +156,18 @@ file appears. The app csproj excludes `tests/**` from its default globs because 
   (`Models/AppSettings.cs`); add new types to its `[JsonSerializable]` list. Reflection-based serialization breaks
   under AOT.
 - WinForms is not officially AOT-supported: `_SuppressWinFormsTrimError` forces the publish, and ILC warnings (all
-  from WinForms today) are kept non-fatal with `IlcTreatWarningsAsErrors=false`. A new IL warning naming MovaCore or
-  SharpHook in the CI summary is a real problem. A clean `dotnet build` proves nothing about the published exe;
+  from WinForms today) are kept non-fatal with `IlcTreatWarningsAsErrors=false`. A new IL warning naming MovaCore,
+  SharpHook, NAudio, Whisper.net or System.Net in the CI summary is a real problem. A clean `dotnet build` proves nothing about the published exe;
   verify UI paths against the AOT-published binary.
 - WinForms and Native AOT are verified only by running the published exe (`--smoke-test`, run by CI). When you touch
   UI, resources, P/Invoke or DI registration, extend `SmokeTest.cs` if the new path is not exercised.
 - SharpHook `KeyCode` values are not contiguous (e.g. `VcF12 = 0x7B` but `VcF13 = 0xF000`), so never compute key
   codes arithmetically.
+- Whisper.net is 1.9.2-preview1: the first version with `RuntimeOptions.ForcedRuntimeLibrary`, without which its AVX
+  check (compile-time `false` under AOT on x64) rejects the CPU runtime. NAudio.Wasapi is pinned to exactly 3.1.0, its
+  first release whose COM interop and structs survive AOT. The Whisper runtime packages copy every architecture's
+  files; a target in `MovaCore.csproj` prunes the foreign ones after publish.
+- The Whisper DLLs import the VC++ runtime, and Whisper.net loads them by full path, so Windows looks for msvcp140 etc.
+  in each `runtimes\...` folder (and System32), never next to the exe: the copies go into those folders.
 - SharpHook is pinned to 7.1.x. Version 8 renumbers `KeyCode` and reworks the simulation API; settings store keys by
   name since v1.1, but v1.0 wrote numbers, so an upgrade needs a migration and testing on real Windows.
