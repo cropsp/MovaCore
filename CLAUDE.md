@@ -168,6 +168,11 @@ The tray icons (normal, recording, transcribing), exe icon and settings logo are
 (`AppResources.cs`) generated from `Resources/mouse_icon.png` by `eng/generate-icons.py`; regenerate them instead of
 editing the `.ico`/`.png` by hand.
 
+The README exists in English (`README.md`) and Ukrainian (`README.uk.md`) with the same sections in the same order
+and a language switcher at the top; change both together, using the UI labels from `Strings.cs`. It is written for
+users first (download, quick start, privacy, FAQ); implementation details belong in its "For developers" section.
+The animations and the social preview in `docs/media` are rendered illustrations, not screenshots.
+
 One top-level type per file; interfaces live next to their implementations in `Services/`.
 
 Tests (`tests/MovaCore.Tests`, xUnit) cannot reference the WinForms app, so the csproj compiles the platform-neutral

@@ -1,0 +1,67 @@
+name: Bug report
+description: Something does not work as described
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Security problems go to the [private vulnerability form](https://github.com/cropsp/MovaCore/security/advisories/new) instead.
+        Please do not paste personal text (passwords, messages) anywhere in this form.
+  - type: input
+    id: version
+    attributes:
+      label: MovaCore version
+      description: Shown in the tray menu under About.
+      placeholder: "1.2.0"
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: For example Windows 11 24H2 (Win+R, `winver`).
+    validations:
+      required: true
+  - type: dropdown
+    id: archive
+    attributes:
+      label: Archive
+      options:
+        - win-x64
+        - win-arm64
+    validations:
+      required: true
+  - type: dropdown
+    id: feature
+    attributes:
+      label: Which part?
+      options:
+        - Layout conversion
+        - Voice input
+        - Settings or tray menu
+        - Startup or installation
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: In which application, which hotkey, what you did.
+      placeholder: |
+        1. Open Notepad and type ghbdsn
+        2. Select it and press F10
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: The last lines of the log in `%LOCALAPPDATA%\MovaCore\logs`. It never contains your text, keystrokes or speech, but read it before pasting.
+      render: text
