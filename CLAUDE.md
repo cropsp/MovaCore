@@ -44,7 +44,9 @@ WinForms itself). After publishing, `eng/copy-vc-runtime.ps1` copies the VC++ ru
 `eng/check-native-deps.ps1` fails if any shipped binary imports a DLL a clean PC may lack (`publish.ps1` runs both
 too). The smoke test transcribes a synthesized "hello world" with the cached `ggml-tiny.bin`. Pushing a `v*` tag creates a draft release with zip archives and SHA256 sums; the tag must match
 `<Version>` in `MovaCore.csproj`, and the notes come from that version's `CHANGELOG.md` section
-(`docs/RELEASING.md`).
+(`docs/RELEASING.md`). For tags, CI sends `MovaCore.exe` (only our own file) to SignPath Foundation for signing once
+the repository variable `SIGNPATH_ORGANIZATION_ID` is set, and skips that until then (`docs/CODE_SIGNING.md`, whose
+privacy policy must stay true: MovaCore's only network connection is the user-requested model download).
 
 ## Architecture
 

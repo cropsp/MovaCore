@@ -13,7 +13,7 @@ It also types what you say: hold a key, speak, and the text appears where you ar
 
 ---
 
-## 🆕 New: voice input (coming in 1.2)
+## 🆕 New in 1.2: voice input
 
 <p align="center">
   <picture>
@@ -68,8 +68,9 @@ Settings are stored in `%APPDATA%\MovaCore\settings.json`, downloaded models in 
 
 ### Installation
 1. Download the latest `MovaCore-<version>-win-x64.zip` (or `win-arm64` for ARM devices) from the [Releases](https://github.com/cropsp/MovaCore/releases) page.
-2. Extract the whole archive into one folder and run `MovaCore.exe` — no installation or administrator rights required. Keep the other files next to the exe: `uiohook.dll` is the native keyboard hook and the `runtimes` folder holds speech recognition. Only one instance runs at a time.
-3. Find the mouse icon in your system tray.
+2. Extract the whole archive into one folder and run `MovaCore.exe` — no installation or administrator rights required. Keep the other files next to the exe: `uiohook.dll` is the native keyboard hook, and the `runtimes` and `models` folders hold speech recognition. Only one instance runs at a time.
+3. If Windows says "Windows protected your PC", choose **More info** → **Run anyway**. SmartScreen warns about programs it has not seen often yet; the [Code signing policy](docs/CODE_SIGNING.md) says which releases are signed.
+4. Find the mouse icon in your system tray.
 
 > **Note:** Windows does not let a regular app read keystrokes from, or send input to, windows running as administrator.
 > To convert text in elevated apps, start MovaCore as administrator too. "Launch at Windows startup" always starts it without elevation.

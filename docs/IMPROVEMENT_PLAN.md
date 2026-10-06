@@ -233,6 +233,10 @@ CS8618 для подій `ConversionCompleted`/`HotkeyTriggered`, CS8622 для 
 - **Підпис коду.** Непідписаний `.exe` з глобальним клавіатурним хуком майже гарантовано викликає SmartScreen і
   хибні спрацювання антивірусів. Варіанти: SignPath Foundation (безкоштовно для OSS) або Azure Trusted Signing.
   Згодом можна додати маніфест winget.
+  **Стан (v1.2.0):** власник обрав SignPath Foundation. Azure Artifact Signing (колишній Trusted Signing) приватним
+  особам доступний лише в США й Канаді. CI вже вміє підписувати `MovaCore.exe` для тегів релізів і вмикає це
+  змінною `SIGNPATH_ORGANIZATION_ID`; є сторінка `docs/CODE_SIGNING.md`, а налаштування описано в
+  `docs/RELEASING.md`. Чекаємо схвалення заявки. v1.2.0 виходить без підпису.
 
 ---
 

@@ -5,6 +5,8 @@ All notable changes to MovaCore are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-06
+
 ### Added
 - Voice input: hold the dictation hotkey (ScrollLock by default), speak and release, and the speech is recognized
   locally with Whisper and pasted into the focused application; the clipboard is restored afterwards. Settings:
@@ -33,6 +35,9 @@ All notable changes to MovaCore are documented here. The format follows
   to General, since they apply to dictation too.
 - The release archives contain `runtimes` and `models` folders (speech recognition, with the Visual C++ runtime it
   needs) and `THIRD-PARTY-NOTICES.txt`; the x64 archive is larger mostly because of the Vulkan build of whisper.cpp.
+- The installation instructions say what to do when Windows SmartScreen warns about the program. The
+  [code signing policy](https://github.com/cropsp/MovaCore/blob/main/docs/CODE_SIGNING.md) describes how releases
+  will be signed through SignPath Foundation; this release is not signed yet.
 
 ## [1.1.0] - 2026-10-01
 
@@ -72,6 +77,7 @@ All notable changes to MovaCore are documented here. The format follows
 
 - First release.
 
-[Unreleased]: https://github.com/cropsp/MovaCore/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/cropsp/MovaCore/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/cropsp/MovaCore/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/cropsp/MovaCore/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/cropsp/MovaCore/releases/tag/v1.0.0

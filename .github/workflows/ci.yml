@@ -41,6 +41,9 @@ jobs:
     name: Publish ${{ matrix.rid }}
     needs: build
     runs-on: windows-latest
+    permissions:
+      contents: read
+      actions: read # SignPath downloads the exe artifact with this job's token
     strategy:
       fail-fast: false
       matrix:
@@ -163,6 +166,41 @@ jobs:
           if ($p.ExitCode -eq 0) { throw 'Expected a failure without uiohook.dll' }
           if (-not (Select-String -Path $log -Pattern 'uiohook.dll was not found' -Quiet)) { throw 'Missing-DLL error was not logged' }
 
+      # Release tags are signed once SignPath is set up (docs/CODE_SIGNING.md, docs/RELEASING.md). Only our own exe is
+      # sent: SignPath signs no third-party files. The request waits until the maintainer approves it in SignPath.
+      - name: Upload the exe for signing
+        id: unsigned-exe
+        if: startsWith(github.ref, 'refs/tags/v') && vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: actions/upload-artifact@v6
+        with:
+          name: MovaCore-${{ matrix.rid }}-unsigned-exe
+          path: out/${{ matrix.rid }}/MovaCore.exe
+          if-no-files-found: error
+
+      - name: Sign with SignPath
+        if: steps.unsigned-exe.outcome == 'success'
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: MovaCore
+          signing-policy-slug: release-signing
+          github-artifact-id: ${{ steps.unsigned-exe.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed
+
+      - name: Check the signature
+        if: steps.unsigned-exe.outcome == 'success'
+        shell: pwsh
+        run: |
+          $signature = Get-AuthenticodeSignature signed/MovaCore.exe
+          if ($signature.Status -ne 'Valid') { throw "MovaCore.exe is not validly signed: $($signature.Status) $($signature.StatusMessage)" }
+          if (-not $signature.TimeStamperCertificate) { throw 'The signature has no timestamp' }
+          "Signed by $($signature.SignerCertificate.Subject)"
+          "### ${{ matrix.rid }}: MovaCore.exe signed by $($signature.SignerCertificate.Subject)" >> $env:GITHUB_STEP_SUMMARY
+          Copy-Item signed/MovaCore.exe out/${{ matrix.rid }}/MovaCore.exe -Force
+
       # upload-artifact only fails when nothing matches, so check every part that a release needs
       - name: Check the release files
         shell: pwsh
@@ -196,6 +234,8 @@ jobs:
 
       # The tag must match <Version> in MovaCore.csproj, and CHANGELOG.md must have a section for it
       - name: Release notes from CHANGELOG.md
+        env:
+          SIGNED: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
         run: |
           version="${GITHUB_REF_NAME#v}"
           project_version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' MovaCore.csproj)
@@ -218,7 +258,17 @@ jobs:
           archive into one folder and run \`MovaCore.exe\`. Keep the other files next to it: \`uiohook.dll\` is the
           native keyboard hook, and the \`runtimes\` and \`models\` folders hold speech recognition. Checksums are in
           \`SHA256SUMS.txt\`.
+
+          If Windows says "Windows protected your PC" (SmartScreen can do so for a new version), choose
+          **More info** → **Run anyway**.
+
           EOF
+          policy="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/docs/CODE_SIGNING.md"
+          if [ "$SIGNED" = "true" ]; then
+            echo "\`MovaCore.exe\` is signed with a SignPath Foundation certificate; see the [Code signing policy]($policy)." >> release-notes.md
+          else
+            echo "This release is not code-signed yet; see the [Code signing policy]($policy)." >> release-notes.md
+          fi
           cat release-notes.md
 
       - uses: actions/download-artifact@v7

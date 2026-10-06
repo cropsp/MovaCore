@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The SignPath artifact configuration of the MovaCore project (paste it into SignPath; see docs/RELEASING.md).
+  CI sends a GitHub artifact (a zip) holding only MovaCore.exe: SignPath signs no third-party files.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="MovaCore.exe">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>
