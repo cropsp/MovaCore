@@ -136,7 +136,9 @@ Dictation (hold-to-talk) reuses the hook, the clipboard service and the paste:
   processor is built per audio context (Whisper.net fixes it at `Build`), one at a time since each holds its own
   buffers; Whisper.net still creates and frees a whisper state on every call. `ChooseRuntime` runs before any model
   loads, with the GPU option off too, or Whisper.net would pick a runtime itself. `OnNativeLog` keeps whisper.cpp's
-  warnings and errors plus ggml's device lines (Vulkan device and its type, buffers), each distinct line once. It is
+  warnings and errors plus ggml's device lines (Vulkan device and its type, buffers), each distinct line once. Whisper
+  computes with one thread per physical core (`WhisperThreads`: at most 8, 4 for the VAD; cores counted with
+  `GetLogicalProcessorInformationEx`), since a core's second SMT thread only competes for its arithmetic. It is
   also the `ISpeechDetector`: whisper.cpp's Silero VAD with
   `models\ggml-silero-v6.2.0.bin` next to the exe, which `eng/get-vad-model.ps1` puts into the publish output (CI and
   `publish.ps1`; a plain `dotnet build` has none, so the energy threshold is used).

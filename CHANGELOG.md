@@ -13,6 +13,9 @@ All notable changes to MovaCore are documented here. The format follows
   repeat a phrase when it processes so little audio, so it now produces a single segment of limited length, and a
   phrase repeated right after itself is pasted once.
 - The dictation indicator fades out the moment the text is pasted, instead of winking for most of a second after it.
+- Speech recognition uses one thread per processor core (up to 8) instead of one per logical processor: on a
+  processor with Hyper-Threading, two threads on the same core only compete for it. The log names the number of
+  threads.
 
 ### Added
 - The log names the graphics card that speech recognition runs on and how much memory it uses, to help find out why

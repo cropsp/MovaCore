@@ -372,6 +372,11 @@ namespace MovaCore
                 return;
             }
 
+            // Whisper's threads follow the physical cores, which Windows reports in variable-size records
+            int cores = WhisperSpeechRecognizer.PhysicalCoreCount;
+            if (cores < 1 || cores > Environment.ProcessorCount)
+                AppLog.Error($"Smoke test: {cores} processor cores counted, {Environment.ProcessorCount} logical processors");
+
             // A recording of "hello world" if CI could make one, a second of a tone otherwise
             float[] audio;
             if (audioPath != null)

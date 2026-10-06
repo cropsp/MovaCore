@@ -26,6 +26,7 @@ namespace MovaCore.Services
         public const string VadModelFileName = "ggml-silero-v6.2.0.bin";
 
         private const ulong XSTATE_MASK_AVX = 1UL << 2;
+        private const int RelationProcessorCore = 0;
 
         // Load order of a runtime folder: dependencies first, as Whisper.net does it
         private static readonly string[] RuntimeFiles =
@@ -37,6 +38,9 @@ namespace MovaCore.Services
         private static readonly HashSet<string> LoggedNativeMessages = new(StringComparer.Ordinal);
         private static RuntimeLibrary? _runtime;
         private static IDisposable? _nativeLog;
+
+        // Read once: the cores do not change while the app runs
+        private static readonly Lazy<int> PhysicalCores = new(CountPhysicalCores);
 
         private readonly SemaphoreSlim _lock = new(1, 1);
         private WhisperFactory? _factory;
@@ -50,6 +54,9 @@ namespace MovaCore.Services
         private WhisperVadProcessor? _vad;
 
         public static string VadModelPath { get; } = Path.Combine(AppContext.BaseDirectory, "models", VadModelFileName);
+
+        /// <summary>The processor's physical cores, 0 if Windows could not tell (for the smoke test).</summary>
+        internal static int PhysicalCoreCount => PhysicalCores.Value;
 
         public Task PreloadAsync(SpeechOptions options, CancellationToken cancellationToken) =>
             Task.Run(async () =>
@@ -166,7 +173,7 @@ namespace MovaCore.Services
                 _vadFactory = WhisperVadFactory.FromPath(VadModelPath, new WhisperFactoryOptions { UseGpu = false });
                 _vad = _vadFactory.CreateBuilder()
                     .WithUseGpu(false)
-                    .WithThreads(Math.Clamp(Environment.ProcessorCount, 1, 4))
+                    .WithThreads(ThreadCount(WhisperThreads.MaxForVad))
                     .WithThreshold(0.3f)
                     .WithMinSpeechDuration(TimeSpan.FromMilliseconds(100))
                     .WithMinSilenceDuration(TimeSpan.FromMilliseconds(450))
@@ -244,7 +251,7 @@ namespace MovaCore.Services
             WhisperProcessorBuilder builder = _factory!.CreateBuilder()
                 .WithLanguage(options.Language)
                 .WithNoContext()
-                .WithThreads(Math.Clamp(Environment.ProcessorCount, 1, 8));
+                .WithThreads(ThreadCount(WhisperThreads.Max));
             if (audioContext < WhisperAudioContext.Full)
             {
                 // A short context makes Whisper prone to repeating the phrase once it is done: one segment, and a
@@ -351,9 +358,30 @@ namespace MovaCore.Services
                 RuntimeOptions.ForcedRuntimeLibrary = runtime;
                 _nativeLog ??= LogProvider.AddLogger(OnNativeLog);
                 _runtime = runtime;
-                AppLog.Info($"Speech recognition runtime: {runtime}");
+                AppLog.Info($"Speech recognition runtime: {runtime}, {ThreadCount(WhisperThreads.Max)} threads " +
+                    $"({PhysicalCores.Value} cores, {Environment.ProcessorCount} logical processors)");
                 return runtime;
             }
+        }
+
+        private static int ThreadCount(int max) => WhisperThreads.For(PhysicalCores.Value, Environment.ProcessorCount, max);
+
+        private static unsafe int CountPhysicalCores()
+        {
+            // The first call tells the size the records need
+            uint length = 0;
+            GetLogicalProcessorInformationEx(RelationProcessorCore, null, &length);
+            var records = new byte[length];
+            fixed (byte* buffer = records)
+            {
+                if (length == 0 || !GetLogicalProcessorInformationEx(RelationProcessorCore, buffer, &length))
+                {
+                    // As before: a thread per logical processor
+                    AppLog.Error($"Could not count the processor cores (error {Marshal.GetLastPInvokeError()})");
+                    return 0;
+                }
+            }
+            return WhisperThreads.CountCores(records.AsSpan(0, (int)length));
         }
 
         /// <summary>
@@ -410,5 +438,9 @@ namespace MovaCore.Services
         // The XSAVE features Windows enables (Windows 7 SP1 and later)
         [LibraryImport("kernel32.dll")]
         private static partial ulong GetEnabledXStateFeatures();
+
+        [LibraryImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static unsafe partial bool GetLogicalProcessorInformationEx(int relationshipType, byte* buffer, uint* returnedLength);
     }
 }
