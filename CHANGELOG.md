@@ -18,12 +18,16 @@ All notable changes to MovaCore are documented here. The format follows
   threads.
 - On a graphics card, a short phrase is recognized about twice as fast: the working memory of speech recognition is
   now set up once, when the model loads, instead of for every phrase, which took about half of the time.
-- On a graphics card, speech recognition weighs five candidate transcriptions instead of one (beam search), as
-  whisper.cpp's own tool and OpenAI's Whisper do: fewer wrong letters and words, for a fraction of a second. On the
-  processor it still takes the single most likely one, since there the extra candidates would cost several times as
-  much.
+- On a separate graphics card with at least 4 GB of memory, speech recognition weighs five candidate transcriptions
+  instead of one (beam search), as whisper.cpp's own tool and OpenAI's Whisper do: fewer wrong letters and words, for
+  a fraction of a second. On the processor, a built-in graphics card or a smaller card it still takes the single most
+  likely one, since there the extra candidates would cost more than they are worth.
 
 ### Added
+- **Graphics card** on the Voice tab replaces "Use the graphics card (Vulkan)": **Automatic**, a card of your choice,
+  or **Processor only**. Automatic prefers a separate graphics card to one built into the processor: before, the
+  first card Vulkan listed was used, on a laptop often the slower built-in one. Switching between cards takes effect
+  at once; from Processor only to a card, after a restart.
 - The log names the graphics card that speech recognition runs on and how much memory it uses, to help find out why
   recognition is slow on a given computer.
 

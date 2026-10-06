@@ -82,8 +82,10 @@ starting: wait until the grass turns green.
 - **Models.** The default is Whisper Large v3 Turbo q8_0 (874 MB). On the Voice tab you can pick the full-precision
   model (1.6 GB, best with a graphics card), a smaller one (574 MB) for slower computers, or your own whisper.cpp
   model file (`ggml-*.bin`; GGUF files are not supported). A downloaded model can be deleted there to free disk space.
-- **Speed.** On x64, **Use the graphics card (Vulkan)** makes recognition much faster (it takes effect after a
-  restart). Without it, recognition runs on the processor, which needs AVX2 (most x64 processors made since 2013).
+- **Speed.** On x64, a graphics card makes recognition much faster. **Graphics card** on the Voice tab is
+  **Automatic** by default, which prefers a separate graphics card to one built into the processor; you can pick a card
+  yourself, or **Processor only** (switching from it to a card takes effect after a restart). On the processor,
+  recognition needs AVX2 (most x64 processors made since 2013).
   **Faster recognition of short phrases** (experimental, on by default) makes Whisper process only as much audio as
   the phrase takes instead of 30 seconds; turn it off if phrases come out worse.
 - **Language.** Whisper detects it automatically, or you can pick Ukrainian, English or another language.
@@ -169,8 +171,9 @@ Windows lets desktop apps use the microphone (Windows Settings → Privacy & sec
 <details>
 <summary>Voice input is slow</summary>
 
-On x64, turn on **Use the graphics card (Vulkan)** on the Voice tab and restart MovaCore. Otherwise, choose the smaller
-model. Right after MovaCore starts, loading the model takes a few seconds.
+On x64, check that **Graphics card** on the Voice tab is not set to **Processor only** (after changing it, restart
+MovaCore). On a laptop with an NVIDIA or AMD card that is not in the list, install that card's driver. Otherwise, choose
+the smaller model. Right after MovaCore starts, loading the model takes a few seconds.
 
 </details>
 

@@ -61,6 +61,8 @@
     <Compile Include="../../Services/WhisperAudioContext.cs" Link="Linked/WhisperAudioContext.cs" />
     <Compile Include="../../Services/WhisperThreads.cs" Link="Linked/WhisperThreads.cs" />
     <Compile Include="../../Services/WhisperFullParams.cs" Link="Linked/WhisperFullParams.cs" />
+    <Compile Include="../../Models/GpuDevice.cs" Link="Linked/GpuDevice.cs" />
+    <Compile Include="../../Services/GpuChoice.cs" Link="Linked/GpuChoice.cs" />
     <Compile Include="../../Services/TranscriptText.cs" Link="Linked/TranscriptText.cs" />
     <Compile Include="../../Services/SpeechModelFile.cs" Link="Linked/SpeechModelFile.cs" />
     <Compile Include="../../Services/SpeechModelCatalog.cs" Link="Linked/SpeechModelCatalog.cs" />

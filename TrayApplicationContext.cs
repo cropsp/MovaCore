@@ -114,7 +114,8 @@ namespace MovaCore
                 s.SpeechUseGpu,
                 s.SpeechMicrophoneId,
                 s.RestoreClipboard,
-                s.SpeechFastRecognition));
+                s.SpeechFastRecognition,
+                s.SpeechGpu));
 
             // Turning dictation on downloads the chosen model (and resumes an interrupted download at startup), unless
             // the user has just cancelled that download, or deleted the model, in the settings
@@ -374,7 +375,8 @@ namespace MovaCore
         private void ShowSettingsDialog()
         {
             using var form = new SettingsForm(
-                _currentSettings, ct => _hotkeyService.CaptureHotkeyAsync(ct), _recorder.GetInputDevices(), _downloads);
+                _currentSettings, ct => _hotkeyService.CaptureHotkeyAsync(ct), _recorder.GetInputDevices(), VulkanDevices.List(),
+                _downloads);
             _settingsForm = form;
             // Pausing or resuming while a hotkey is being recorded would leave the hook in the wrong state
             _pauseItem?.Enabled = false;

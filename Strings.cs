@@ -266,11 +266,23 @@ namespace MovaCore
         public static string SpeechMicrophoneLabel => T("Microphone:", "Мікрофон:");
         public static string SpeechMicrophoneDefault => T("As in Windows", "Як у Windows");
         public static string SpeechMicrophoneUnavailable => T("Unavailable microphone", "Недоступний мікрофон");
-        public static string SpeechUseGpu => T("Use the graphics card (Vulkan)", "Використовувати відеокарту (Vulkan)");
+        public static string SpeechGpuLabel => T("Graphics card:", "Відеокарта:");
+        public static string SpeechGpuAutomatic => T("Automatic", "Автоматично");
+        public static string SpeechGpuAutomaticWith(string name) => string.Format(T("Automatic: {0}", "Автоматично: {0}"), name);
+        public static string SpeechGpuProcessorOnly => T("Processor only", "Лише процесор");
+        public static string SpeechGpuUnavailable(string name) => string.Format(T("{0} (not found)", "{0} (не знайдено)"), name);
 
-        public static string SpeechUseGpuTooltip => T(
-            "Much faster with NVIDIA, AMD or Intel graphics. A change takes effect after restarting MovaCore.",
-            "Набагато швидше з відеокартами NVIDIA, AMD чи Intel. Зміна діє після перезапуску MovaCore.");
+        /// <summary>"NVIDIA GeForce RTX 4060 (8 GB)", "Intel(R) UHD Graphics (integrated)".</summary>
+        public static string SpeechGpuName(GpuDevice gpu)
+        {
+            if (!gpu.Discrete) return string.Format(T("{0} (integrated)", "{0} (вбудована)"), gpu.Name);
+            double gigabytes = Math.Round(gpu.Memory / (double)(1UL << 30));
+            return gigabytes < 1 ? gpu.Name : $"{gpu.Name} ({gigabytes.ToString("0", CultureInfo.InvariantCulture)}{T(" GB", " ГБ")})";
+        }
+
+        public static string SpeechGpuTooltip => T(
+            "Much faster with NVIDIA, AMD or Intel graphics, through Vulkan. Automatic prefers a separate graphics card to one built into the processor. Switching from Processor only to a graphics card takes effect after restarting MovaCore.",
+            "Набагато швидше з відеокартами NVIDIA, AMD чи Intel, через Vulkan. «Автоматично» віддає перевагу окремій відеокарті перед вбудованою в процесор. Перехід з «Лише процесор» на відеокарту діє після перезапуску MovaCore.");
 
         public static string SpeechFastRecognition => T(
             "Faster recognition of short phrases (experimental)",

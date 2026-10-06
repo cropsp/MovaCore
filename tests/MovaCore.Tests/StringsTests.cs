@@ -180,6 +180,21 @@ namespace MovaCore.Tests
             Assert.Equal(expected, Strings.FormatSize(bytes));
         }
 
+        // A discrete card's memory as Vulkan reports it: an 8 GB card has a little less than 8 GiB for itself
+        [Theory]
+        [InlineData(UiLanguage.English, true, 7.6, "NVIDIA GeForce RTX 4060 (8 GB)")]
+        [InlineData(UiLanguage.Ukrainian, true, 1.9, "NVIDIA GeForce RTX 4060 (2 ГБ)")]
+        [InlineData(UiLanguage.English, true, 0.0, "NVIDIA GeForce RTX 4060")]
+        [InlineData(UiLanguage.English, false, 15.7, "NVIDIA GeForce RTX 4060 (integrated)")]
+        [InlineData(UiLanguage.Ukrainian, false, 15.7, "NVIDIA GeForce RTX 4060 (вбудована)")]
+        public void GpuName_GivesMemoryOrIntegrated(UiLanguage language, bool discrete, double gibibytes, string expected)
+        {
+            Strings.Language = language;
+
+            var gpu = new GpuDevice(0, "NVIDIA GeForce RTX 4060", discrete, (ulong)(gibibytes * (1UL << 30)));
+            Assert.Equal(expected, Strings.SpeechGpuName(gpu));
+        }
+
         [Fact]
         public void FormatVersion_UsesMajorMinorBuild()
         {

@@ -139,8 +139,13 @@ Dictation (hold-to-talk) reuses the hook, the clipboard service and the paste:
   state per loaded model, since `whisper_full_with_state` takes the audio context per call. The model's context comes
   from Whisper.net's private `WhisperFactory.contextLazy` (`UnsafeAccessor`), and `WhisperFullParams` mirrors
   whisper.cpp's struct, passed by value: when upgrading Whisper.net, check both against its source and bundled
-  `whisper.h` (`WhisperFullParamsTests` holds the size and offsets). A model on the GPU decodes with beam search
-  (5 beams), on the CPU greedily. If the decoders' cache does not fit, `whisper_full_with_state` frees the state
+  `whisper.h` (`WhisperFullParamsTests` holds the size and offsets). The graphics card: `VulkanDevices` lists the
+  discrete and integrated cards through `vulkan-1.dll` in Vulkan's order, as ggml-vulkan does (once per process; the
+  settings form gets the list), `GpuChoice.Pick` takes the chosen one by name (`AppSettings.SpeechGpu`, null:
+  automatic) or else the discrete card with the most memory, and its position goes to whisper.cpp as `gpu_device`
+  (`WhisperFactoryOptions.GpuDevice`) when the model loads, so another card means a reload, not a restart. Not
+  `GGML_VK_VISIBLE_DEVICES`: ggml reads it with the CRT's `getenv`, which may not see a change made from .NET. A discrete
+  card with at least 4 GB decodes with beam search (5 beams, `GpuChoice.UseBeamSearch`); other cards and the CPU greedily. If the decoders' cache does not fit, `whisper_full_with_state` frees the state
   itself and returns -7; the recognizer then drops it without freeing it again. The text comes back in the parts
   Whisper marked with timestamps (`WhisperNative.ReadParts`; a part is decoded from its bytes whole, since tokens split
   Cyrillic letters): Whisper repeats a phrase when it thinks audio follows the speech, as a part of its own, and
@@ -177,7 +182,8 @@ Settings: `Services/SettingsService.cs` stores `Models/AppSettings` as JSON in `
 (`HKCU\...\Run`) lives behind `IStartupRegistration` (`StartupRegistration.cs`) and is the source of truth for
 `LaunchAtStartup`; `Load` re-points it at the running exe only when the registered exe no longer exists.
 `UI/SettingsForm.cs` is built in code (no designer file) from auto-sizing `TableLayoutPanel`s with
-`AutoScaleMode.Dpi`, on three tabs (Layout, Voice, General); a `TabControl` does not size itself, so
+`AutoScaleMode.Dpi`, on three tabs (Layout, Voice, General; the Voice tab's graphics card list replaces the old
+GPU checkbox: Automatic, the cards, Processor only); a `TabControl` does not size itself, so
 `FitTabsToPages` sizes it from the largest page. Both hotkeys are recorded by `UI/HotkeyPicker` through
 `IHotkeyService.CaptureHotkeyAsync`, which refuses a combination the other hotkey uses. `OnSaveClick` builds a new
 `AppSettings`: a field it does not copy resets to its default. The tray offers Settings, Pause

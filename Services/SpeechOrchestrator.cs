@@ -116,7 +116,8 @@ namespace MovaCore.Services
             }
             else if (SpeechModelFile.Check(settings.ModelPath) == SpeechModelFormat.Ggml)
             {
-                Post(new PreloadRequested(new SpeechOptions(settings.ModelPath!, settings.Language, settings.UseGpu, settings.FastRecognition)));
+                Post(new PreloadRequested(new SpeechOptions(
+                    settings.ModelPath!, settings.Language, settings.UseGpu, settings.FastRecognition, settings.GpuName)));
             }
             else
             {
@@ -212,7 +213,7 @@ namespace MovaCore.Services
             }
 
             int generation = ++_generation;
-            _options = new SpeechOptions(settings.ModelPath!, settings.Language, settings.UseGpu, settings.FastRecognition);
+            _options = new SpeechOptions(settings.ModelPath!, settings.Language, settings.UseGpu, settings.FastRecognition, settings.GpuName);
             _restoreClipboard = settings.RestoreClipboard;
             _recordingStarted = Stopwatch.GetTimestamp();
             _workCts?.Dispose();

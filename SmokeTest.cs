@@ -64,7 +64,15 @@ namespace MovaCore
                             recorder.Close(); // closing a microphone that is not open does nothing
                             if (recorder.IsOpen || recorder.CopyRecent(new float[SpectrumAnalyzer.WindowSize]) != 0)
                                 AppLog.Error("Smoke test: a closed recorder reports audio");
-                            form = new SettingsForm(new AppSettings(), _ => Task.FromResult<Hotkey?>(null), microphones, downloads);
+                            // CI runners have no graphics card either: listing them through Vulkan must work all the same
+                            AppLog.Info($"Smoke test: {VulkanDevices.List().Count} graphics card(s) found");
+                            // The form gets made-up cards, so that their list is laid out too
+                            var gpus = new[]
+                            {
+                                new GpuDevice(0, "Integrated Graphics", false, 1UL << 30),
+                                new GpuDevice(1, "Discrete Graphics", true, 8UL << 30),
+                            };
+                            form = new SettingsForm(new AppSettings(), _ => Task.FromResult<Hotkey?>(null), microphones, gpus, downloads);
                             form.Show();
                             break;
                         case 1:

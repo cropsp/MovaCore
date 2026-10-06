@@ -50,8 +50,11 @@ namespace MovaCore.Models
         /// <summary>The Windows audio endpoint ID of the microphone; null for the Windows default.</summary>
         public string? SpeechMicrophoneId { get; set; }
 
-        /// <summary>Transcribe on the GPU through Vulkan where available (x64 only).</summary>
+        /// <summary>Transcribe on the GPU through Vulkan where available (x64 only); false: on the processor only.</summary>
         public bool SpeechUseGpu { get; set; } = true;
+
+        /// <summary>The graphics card's name as Vulkan gives it; null to choose one automatically (a discrete card first).</summary>
+        public string? SpeechGpu { get; set; }
 
         /// <summary>
         /// Encode short phrases with a shorter audio context (<see cref="Services.WhisperAudioContext"/>): several times

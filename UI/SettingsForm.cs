@@ -30,6 +30,7 @@ namespace MovaCore.UI
         private readonly Func<CancellationToken, Task<Hotkey?>> _captureHotkey;
         private readonly ModelDownloadManager _downloads;
         private readonly List<string?> _microphoneIds = new(); // per item of _microphoneComboBox; null = Windows default
+        private readonly List<(bool UseGpu, string? Name)> _gpuChoices = new(); // per item of _gpuComboBox; null = automatic
         private readonly CancellationTokenSource _captureCts = new();
         private readonly ToolTip _toolTip = new();
         private readonly Font _titleFont = new("Segoe UI", 11F, FontStyle.Bold);
@@ -60,7 +61,7 @@ namespace MovaCore.UI
         private readonly LinkLabel _whereToGetLink = new();
         private readonly ComboBox _speechLanguageComboBox = new();
         private readonly ComboBox _microphoneComboBox = new();
-        private readonly CheckBox _useGpuCheckBox = new();
+        private readonly ComboBox _gpuComboBox = new();
         private readonly CheckBox _fastRecognitionCheckBox = new();
         private readonly CheckBox _overlayCheckBox = new();
         private readonly Button _saveButton = new();
@@ -75,25 +76,27 @@ namespace MovaCore.UI
         /// global hook would otherwise swallow the current trigger while the user is trying to change it.
         /// </param>
         /// <param name="microphones">The microphones to offer.</param>
+        /// <param name="gpus">The graphics cards to offer.</param>
         /// <param name="downloads">Shows and controls the download of the speech model.</param>
         public SettingsForm(
             AppSettings currentSettings,
             Func<CancellationToken, Task<Hotkey?>> captureHotkey,
             IReadOnlyList<AudioInputDevice> microphones,
+            IReadOnlyList<GpuDevice> gpus,
             ModelDownloadManager downloads)
         {
             _settings = currentSettings;
             _captureHotkey = captureHotkey;
             _downloads = downloads;
             _customModelPath = currentSettings.SpeechCustomModelPath;
-            InitializeComponent(microphones);
+            InitializeComponent(microphones, gpus);
             _downloads.StateChanged += OnDownloadStateChanged;
         }
 
         /// <summary>For the smoke test, which shows every page.</summary>
         internal TabControl Tabs => _tabs;
 
-        private void InitializeComponent(IReadOnlyList<AudioInputDevice> microphones)
+        private void InitializeComponent(IReadOnlyList<AudioInputDevice> microphones, IReadOnlyList<GpuDevice> gpus)
         {
             // The panels below size themselves from their content, so longer (translated) texts and larger
             // fonts never get clipped, and the form follows
@@ -116,7 +119,7 @@ namespace MovaCore.UI
             _toolTip.AutoPopDelay = 10000;
 
             AddPage(Strings.TabLayout, CreateHotkeyGroup(), CreateConversionGroup());
-            AddPage(Strings.TabVoice, CreateVoicePage(microphones));
+            AddPage(Strings.TabVoice, CreateVoicePage(microphones, gpus));
             AddPage(Strings.TabGeneral, CreateGeneralGroup(), CreateExcludedGroup());
             _tabs.Margin = new Padding(0, 0, 0, 10);
 
@@ -275,7 +278,7 @@ namespace MovaCore.UI
                 _convertLastWordCheckBox);
         }
 
-        private Control CreateVoicePage(IReadOnlyList<AudioInputDevice> microphones)
+        private Control CreateVoicePage(IReadOnlyList<AudioInputDevice> microphones, IReadOnlyList<GpuDevice> gpus)
         {
             ConfigureCheckBox(_speechEnabledCheckBox, Strings.SpeechEnable, _settings.SpeechEnabled);
             _speechEnabledCheckBox.Margin = new Padding(3, 3, 3, 8);
@@ -289,9 +292,50 @@ namespace MovaCore.UI
             AddRow(content, _speechEnabledCheckBox);
             AddRow(content, CreateGroup(Strings.SpeechHotkeyGroup, _speechPicker));
             AddRow(content, CreateModelGroup());
-            AddRow(content, CreateRecognitionGroup(microphones));
+            AddRow(content, CreateRecognitionGroup(microphones, gpus));
             AddRow(content, CreateHint(Strings.SpeechPrivacy));
             return content;
+        }
+
+        /// <summary>
+        /// Automatic (naming the card it picks), each card, then the processor alone. A chosen card that is not there now
+        /// stays chosen, as an unplugged microphone does; dictation picks automatically until it is back.
+        /// </summary>
+        private void ConfigureGpuComboBox(IReadOnlyList<GpuDevice> gpus)
+        {
+            if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
+            {
+                // Whisper.net has no Vulkan build for ARM: the setting stays as it was
+                _gpuChoices.Add((_settings.SpeechUseGpu, _settings.SpeechGpu));
+                ConfigureComboBox(_gpuComboBox, Strings.SpeechGpuLabel, new object[] { Strings.SpeechGpuProcessorOnly }, 0);
+                _gpuComboBox.Enabled = false;
+                _toolTip.SetToolTip(_gpuComboBox, Strings.SpeechUseGpuUnavailable);
+                return;
+            }
+
+            var items = new List<object>();
+            GpuDevice? automatic = GpuChoice.Pick(gpus, null);
+            items.Add(automatic == null ? Strings.SpeechGpuAutomatic : Strings.SpeechGpuAutomaticWith(automatic.Name));
+            _gpuChoices.Add((true, null));
+            int selected = 0;
+            foreach (GpuDevice gpu in gpus)
+            {
+                if (_settings.SpeechGpu == gpu.Name && selected == 0) selected = items.Count;
+                items.Add(Strings.SpeechGpuName(gpu));
+                _gpuChoices.Add((true, gpu.Name));
+            }
+            if (_settings.SpeechGpu != null && selected == 0)
+            {
+                selected = items.Count;
+                items.Add(Strings.SpeechGpuUnavailable(_settings.SpeechGpu));
+                _gpuChoices.Add((true, _settings.SpeechGpu));
+            }
+            items.Add(Strings.SpeechGpuProcessorOnly);
+            _gpuChoices.Add((false, null));
+            if (!_settings.SpeechUseGpu) selected = items.Count - 1;
+
+            ConfigureComboBox(_gpuComboBox, Strings.SpeechGpuLabel, items.ToArray(), selected);
+            _toolTip.SetToolTip(_gpuComboBox, Strings.SpeechGpuTooltip);
         }
 
         private Control CreateModelGroup()
@@ -357,7 +401,7 @@ namespace MovaCore.UI
             return CreateGroup(Strings.SpeechModelGroup, _modelComboBox, _customModelRow, statusRow, _modelProgress, _whereToGetLink);
         }
 
-        private Control CreateRecognitionGroup(IReadOnlyList<AudioInputDevice> microphones)
+        private Control CreateRecognitionGroup(IReadOnlyList<AudioInputDevice> microphones, IReadOnlyList<GpuDevice> gpus)
         {
             var languageItems = new List<object>();
             foreach (string code in SpeechLanguages.Codes) languageItems.Add(Strings.SpeechLanguageName(code));
@@ -385,18 +429,7 @@ namespace MovaCore.UI
             }
             ConfigureComboBox(_microphoneComboBox, Strings.SpeechMicrophoneLabel, microphoneItems.ToArray(), selectedMicrophone);
 
-            ConfigureCheckBox(_useGpuCheckBox, Strings.SpeechUseGpu, _settings.SpeechUseGpu);
-            if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
-            {
-                // Whisper.net has no Vulkan build for ARM
-                _useGpuCheckBox.Checked = false;
-                _useGpuCheckBox.Enabled = false;
-                _toolTip.SetToolTip(_useGpuCheckBox, Strings.SpeechUseGpuUnavailable);
-            }
-            else
-            {
-                _toolTip.SetToolTip(_useGpuCheckBox, Strings.SpeechUseGpuTooltip);
-            }
+            ConfigureGpuComboBox(gpus);
             ConfigureCheckBox(_fastRecognitionCheckBox, Strings.SpeechFastRecognition, _settings.SpeechFastRecognition);
             _toolTip.SetToolTip(_fastRecognitionCheckBox, Strings.SpeechFastRecognitionTooltip);
             ConfigureCheckBox(_overlayCheckBox, Strings.SpeechShowOverlay, _settings.SpeechShowOverlay);
@@ -405,7 +438,7 @@ namespace MovaCore.UI
                 Strings.SpeechRecognitionGroup,
                 CreateLabeledRow(new Label { Text = Strings.SpeechLanguageLabel }, _speechLanguageComboBox),
                 CreateLabeledRow(new Label { Text = Strings.SpeechMicrophoneLabel }, _microphoneComboBox),
-                _useGpuCheckBox,
+                CreateLabeledRow(new Label { Text = Strings.SpeechGpuLabel }, _gpuComboBox),
                 _fastRecognitionCheckBox,
                 _overlayCheckBox);
         }
@@ -600,7 +633,7 @@ namespace MovaCore.UI
             {
                 control.Enabled = enabled;
             }
-            _useGpuCheckBox.Enabled = enabled && RuntimeInformation.ProcessArchitecture != Architecture.Arm64;
+            _gpuComboBox.Enabled = enabled && RuntimeInformation.ProcessArchitecture != Architecture.Arm64;
 
             SpeechModelInfo? model = SelectedModel;
             _customModelRow.Visible = model == null;
@@ -770,10 +803,8 @@ namespace MovaCore.UI
                 SpeechCustomModelPath = _customModelPath,
                 SpeechLanguage = SpeechLanguages.Codes[Math.Max(_speechLanguageComboBox.SelectedIndex, 0)],
                 SpeechMicrophoneId = _microphoneIds[Math.Max(_microphoneComboBox.SelectedIndex, 0)],
-                // Kept as it was on ARM, where the box is always disabled
-                SpeechUseGpu = RuntimeInformation.ProcessArchitecture == Architecture.Arm64
-                    ? _settings.SpeechUseGpu
-                    : _useGpuCheckBox.Checked,
+                SpeechUseGpu = _gpuChoices[Math.Max(_gpuComboBox.SelectedIndex, 0)].UseGpu,
+                SpeechGpu = _gpuChoices[Math.Max(_gpuComboBox.SelectedIndex, 0)].Name,
                 SpeechFastRecognition = _fastRecognitionCheckBox.Checked,
                 SpeechShowOverlay = _overlayCheckBox.Checked,
             };

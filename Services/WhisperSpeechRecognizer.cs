@@ -55,6 +55,8 @@ namespace MovaCore.Services
         private IntPtr _state;   // its whisper_state: compute buffers, on the model's device
         private string? _loadedModel;
         private bool _loadedOnGpu;
+        private GpuDevice? _loadedGpu; // null on the CPU, or when Vulkan lists no card
+        private bool _beamSearch;
         private bool _warmedUp;
         private WhisperVadFactory? _vadFactory;
         private WhisperVadProcessor? _vad;
@@ -166,8 +168,9 @@ namespace MovaCore.Services
         /// marked with timestamps (<see cref="WhisperNative.ReadParts"/>). whisper.cpp takes the audio context from the
         /// parameters of each call, and the state's buffers are sized for the whole window, so every size shares it.
         /// The parameters are those Whisper.net set before (its defaults plus what its builder was asked for), except that
-        /// a graphics card decodes with beam search: five candidates instead of one, more accurate for a fraction of a
-        /// second there, while on a processor the decoder would cost several times as much.
+        /// a large discrete graphics card decodes with beam search (<see cref="GpuChoice.UseBeamSearch"/>): five
+        /// candidates instead of one, more accurate for a fraction of a second there, while on a processor or a small card
+        /// the decoder would cost several times as much.
         /// </summary>
         private unsafe IReadOnlyList<string> Transcribe(
             float[] samples, SpeechOptions options, int audioContext, CancellationToken cancellationToken)
@@ -176,7 +179,7 @@ namespace MovaCore.Services
             if (samples.Length == 0) return Array.Empty<string>();
 
             WhisperFullParams parameters = WhisperNative.DefaultParams(
-                _loadedOnGpu ? WhisperNative.SamplingBeamSearch : WhisperNative.SamplingGreedy);
+                _beamSearch ? WhisperNative.SamplingBeamSearch : WhisperNative.SamplingGreedy);
             parameters.Threads = ThreadCount(WhisperThreads.Max);
             parameters.NoContext = 1;
             parameters.PrintProgress = 0;
@@ -260,7 +263,9 @@ namespace MovaCore.Services
             // loads anything
             RuntimeLibrary runtime = ChooseRuntime(options.UseGpu);
             bool onGpu = options.UseGpu && runtime == RuntimeLibrary.Vulkan;
-            if (_factory != null && _loadedModel == options.ModelPath && _loadedOnGpu == onGpu) return;
+            // whisper.cpp would take the first card Vulkan lists, on a laptop often the integrated one
+            GpuDevice? gpu = onGpu ? GpuChoice.Pick(VulkanDevices.List(), options.GpuName) : null;
+            if (_factory != null && _loadedModel == options.ModelPath && _loadedOnGpu == onGpu && _loadedGpu == gpu) return;
 
             // Never two models in memory at once: they take hundreds of megabytes each
             Free();
@@ -279,7 +284,8 @@ namespace MovaCore.Services
             {
                 // Flash attention: faster, and less memory on the graphics card
                 _factory = WhisperFactory.FromPath(
-                    options.ModelPath, new WhisperFactoryOptions { UseGpu = onGpu, UseFlashAttention = true });
+                    options.ModelPath,
+                    new WhisperFactoryOptions { UseGpu = onGpu, GpuDevice = gpu?.Position ?? 0, UseFlashAttention = true });
                 _factory.CreateBuilder(); // Whisper.net loads the model on first use: now, so that a bad file fails here
             }
             catch (WhisperModelLoadException ex)
@@ -287,8 +293,12 @@ namespace MovaCore.Services
                 Free();
                 throw new SpeechException(SpeechError.ModelUnsupported, ex.Message, ex);
             }
+            bool beamSearch = GpuChoice.UseBeamSearch(gpu);
+            if (gpu != null && options.GpuName != null && gpu.Name != options.GpuName)
+                AppLog.Info($"Graphics card {options.GpuName} not found, {gpu.Name} instead");
+            string device = !onGpu ? "CPU" : $"GPU: {gpu?.Name ?? "none listed"}, {(beamSearch ? "beam search" : "greedy")}";
             AppLog.Info($"Speech model {Path.GetFileName(options.ModelPath)} loaded in " +
-                $"{Stopwatch.GetElapsedTime(started).TotalSeconds:0.0} s ({(onGpu ? "GPU, beam search" : "CPU")})");
+                $"{Stopwatch.GetElapsedTime(started).TotalSeconds:0.0} s ({device})");
 
             // One state for every phrase: Whisper.net would create one, and its buffers, on each transcription
             started = Stopwatch.GetTimestamp();
@@ -309,6 +319,8 @@ namespace MovaCore.Services
 
             _loadedModel = options.ModelPath;
             _loadedOnGpu = onGpu;
+            _loadedGpu = gpu;
+            _beamSearch = beamSearch;
         }
 
         // Whisper.net keeps the model's whisper_context to itself (WhisperFactory.contextLazy in 1.9.2-preview1); a
@@ -369,10 +381,7 @@ namespace MovaCore.Services
 
                 RuntimeLibrary runtime = RuntimeLibrary.Cpu;
                 string folder = cpuFolder;
-                // Implicit Vulkan layers (the overlays of OBS, Steam, RTSS and the like) load into every Vulkan process
-                // and have crashed speech recognition in other apps (Handy); a value the user set is kept
-                if (useGpu && Environment.GetEnvironmentVariable("VK_LOADER_LAYERS_DISABLE") == null)
-                    Environment.SetEnvironmentVariable("VK_LOADER_LAYERS_DISABLE", "~implicit~");
+                if (useGpu) VulkanDevices.DisableImplicitLayers();
                 // Vulkan comes with the graphics driver (vulkan-1.dll). No fallback after trying it: a half-loaded runtime
                 // cannot be mixed with the other one's identically named DLLs.
                 if (useGpu && !arm64 && File.Exists(Path.Combine(vulkanFolder, "ggml-vulkan-whisper.dll"))
