@@ -112,7 +112,8 @@ namespace MovaCore
                 s.SpeechLanguage,
                 s.SpeechUseGpu,
                 s.SpeechMicrophoneId,
-                s.RestoreClipboard));
+                s.RestoreClipboard,
+                s.SpeechFastRecognition));
 
             // Turning dictation on downloads the chosen model (and resumes an interrupted download at startup), unless
             // the user has just cancelled that download, or deleted the model, in the settings

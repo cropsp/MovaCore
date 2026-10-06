@@ -101,6 +101,7 @@ namespace MovaCore.Tests
             Assert.Equal("auto", settings.SpeechLanguage);
             Assert.Null(settings.SpeechMicrophoneId);
             Assert.True(settings.SpeechUseGpu);
+            Assert.True(settings.SpeechFastRecognition);
             Assert.True(settings.SpeechShowOverlay);
         }
 
@@ -125,6 +126,7 @@ namespace MovaCore.Tests
             SpeechLanguage = "uk",
             SpeechMicrophoneId = "{0.0.1.00000000}.{a1b2c3}",
             SpeechUseGpu = false,
+            SpeechFastRecognition = false,
             SpeechShowOverlay = false,
         };
 
@@ -156,6 +158,7 @@ namespace MovaCore.Tests
             Assert.Equal("uk", restored.SpeechLanguage);
             Assert.Equal("{0.0.1.00000000}.{a1b2c3}", restored.SpeechMicrophoneId);
             Assert.False(restored.SpeechUseGpu);
+            Assert.False(restored.SpeechFastRecognition);
             Assert.False(restored.SpeechShowOverlay);
         }
 

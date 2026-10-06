@@ -397,17 +397,21 @@ namespace MovaCore
                 return;
             }
 
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            var watch = Stopwatch.StartNew();
-            IReadOnlyList<string> segments = await recognizer.TranscribeAsync(
-                AudioSamples.PadToMinimum(audio, SpeechOrchestrator.MinAudioLength),
-                new SpeechOptions(modelPath, "en", UseGpu: true),
-                timeout.Token);
-            // Synthetic audio, so the text may be logged
-            string text = TranscriptText.Clean(segments);
-            AppLog.Info($"Smoke test: transcribed in {watch.Elapsed.TotalSeconds:0.0} s: \"{text}\"");
-            if (audioPath != null && !text.Contains("hello", StringComparison.OrdinalIgnoreCase))
-                AppLog.Error("Smoke test: the recording of \"hello world\" was not recognized");
+            // With the whole 30-second window, then with the short audio context of a short phrase
+            float[] padded = AudioSamples.PadToMinimum(audio, SpeechOrchestrator.MinAudioLength);
+            foreach (bool fast in new[] { false, true })
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                var watch = Stopwatch.StartNew();
+                IReadOnlyList<string> segments = await recognizer.TranscribeAsync(
+                    padded, new SpeechOptions(modelPath, "en", UseGpu: true, FastRecognition: fast), timeout.Token);
+                // Synthetic audio, so the text may be logged
+                string text = TranscriptText.Clean(segments);
+                int audioContext = fast ? WhisperAudioContext.For(padded.Length) : WhisperAudioContext.Full;
+                AppLog.Info($"Smoke test: transcribed with audio context {audioContext} in {watch.Elapsed.TotalSeconds:0.00} s: \"{text}\"");
+                if (audioPath != null && !text.Contains("hello", StringComparison.OrdinalIgnoreCase))
+                    AppLog.Error($"Smoke test: the recording of \"hello world\" was not recognized with audio context {audioContext}");
+            }
         }
 
         // The Silero model ships with the app: speech must be found in the recording and none in silence

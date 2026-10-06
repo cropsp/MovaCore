@@ -110,7 +110,7 @@ namespace MovaCore.Services
             }
             else if (SpeechModelFile.Check(settings.ModelPath) == SpeechModelFormat.Ggml)
             {
-                Post(new PreloadRequested(new SpeechOptions(settings.ModelPath!, settings.Language, settings.UseGpu)));
+                Post(new PreloadRequested(new SpeechOptions(settings.ModelPath!, settings.Language, settings.UseGpu, settings.FastRecognition)));
             }
             else
             {
@@ -206,7 +206,7 @@ namespace MovaCore.Services
             }
 
             int generation = ++_generation;
-            _options = new SpeechOptions(settings.ModelPath!, settings.Language, settings.UseGpu);
+            _options = new SpeechOptions(settings.ModelPath!, settings.Language, settings.UseGpu, settings.FastRecognition);
             _restoreClipboard = settings.RestoreClipboard;
             _recordingStarted = Stopwatch.GetTimestamp();
             _workCts?.Dispose();
@@ -356,8 +356,9 @@ namespace MovaCore.Services
                     string text = TranscriptText.Clean(segments);
 
                     // Never log the text itself: it is what the user said
+                    int audioContext = options.FastRecognition ? WhisperAudioContext.For(audio.Length) : WhisperAudioContext.Full;
                     AppLog.Info($"Dictation: {AudioSamples.Duration(speech.Length).TotalSeconds:0.0} s of speech transcribed in " +
-                        $"{Stopwatch.GetElapsedTime(started).TotalSeconds:0.00} s, {text.Length} characters");
+                        $"{Stopwatch.GetElapsedTime(started).TotalSeconds:0.00} s (audio context {audioContext}), {text.Length} characters");
                     Array.Clear(speech);
                     Array.Clear(audio);
 

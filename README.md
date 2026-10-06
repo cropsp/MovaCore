@@ -82,6 +82,8 @@ starting: wait until the grass turns green.
   model file (`ggml-*.bin`; GGUF files are not supported). A downloaded model can be deleted there to free disk space.
 - **Speed.** On x64, **Use the graphics card (Vulkan)** makes recognition much faster (it takes effect after a
   restart). Without it, recognition runs on the processor, which needs AVX2 (most x64 processors made since 2013).
+  **Faster recognition of short phrases** (experimental, on by default) makes Whisper process only as much audio as
+  the phrase takes instead of 30 seconds; turn it off if phrases come out worse.
 - **Language.** Whisper detects it automatically, or you can pick Ukrainian, English or another language.
 - **Continuing a phrase.** If you dictate again right away, without typing or clicking in between, MovaCore adds a
   space and starts with a small letter when the sentence was not finished. After you type or click, it cannot know

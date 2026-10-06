@@ -108,6 +108,17 @@ namespace MovaCore.Tests
         }
 
         [Fact]
+        public void FastRecognition_ReachesTheRecognizer()
+        {
+            _orchestrator.Configure(Settings(_modelPath) with { FastRecognition = true });
+
+            Dictate();
+
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+            Assert.True(Assert.Single(_recognizer.Transcriptions).FastRecognition);
+        }
+
+        [Fact]
         public void ShortPress_IsDiscarded()
         {
             Recreate(minRecording: TimeSpan.FromHours(1));

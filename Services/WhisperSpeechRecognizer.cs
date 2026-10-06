@@ -40,6 +40,7 @@ namespace MovaCore.Services
         private readonly SemaphoreSlim _lock = new(1, 1);
         private WhisperFactory? _factory;
         private WhisperProcessor? _processor;
+        private int _processorContext;
         private string? _loadedModel;
         private bool _loadedOnGpu;
         private bool _warmedUp;
@@ -55,7 +56,9 @@ namespace MovaCore.Services
                 await _lock.WaitAsync(cancellationToken);
                 try
                 {
-                    WhisperProcessor processor = EnsureLoaded(options);
+                    // The processor short phrases need, or the full one
+                    WhisperProcessor processor = GetProcessor(
+                        options, options.FastRecognition ? WhisperAudioContext.Step : WhisperAudioContext.Full);
                     if (!_warmedUp)
                     {
                         _warmedUp = true;
@@ -94,7 +97,8 @@ namespace MovaCore.Services
                 await _lock.WaitAsync(cancellationToken);
                 try
                 {
-                    WhisperProcessor processor = EnsureLoaded(options);
+                    int audioContext = options.FastRecognition ? WhisperAudioContext.For(samples.Length) : WhisperAudioContext.Full;
+                    WhisperProcessor processor = GetProcessor(options, audioContext);
                     var segments = new List<string>();
                     // Unlike ProcessAsync, which gives up on cancellation while whisper.cpp still runs, this completes
                     // only after the native call has returned: the lock must cover it, or the model could be freed
@@ -115,7 +119,7 @@ namespace MovaCore.Services
                 await _lock.WaitAsync();
                 try
                 {
-                    if (_processor == null) return;
+                    if (_factory == null) return;
                     Free();
                     AppLog.Info("Speech model unloaded");
                 }
@@ -177,66 +181,101 @@ namespace MovaCore.Services
             return _vad;
         }
 
-        private WhisperProcessor EnsureLoaded(SpeechOptions options)
+        private void EnsureModelLoaded(SpeechOptions options)
         {
             bool onGpu = options.UseGpu && ChooseRuntime(options.UseGpu) == RuntimeLibrary.Vulkan;
+            if (_factory != null && _loadedModel == options.ModelPath && _loadedOnGpu == onGpu) return;
 
-            if (_processor == null || _loadedModel != options.ModelPath || _loadedOnGpu != onGpu)
+            // Never two models in memory at once: they take hundreds of megabytes each
+            Free();
+            switch (SpeechModelFile.Check(options.ModelPath))
             {
-                // Never two models in memory at once: they take hundreds of megabytes each
+                case SpeechModelFormat.Missing:
+                    throw new SpeechException(SpeechError.ModelMissing, "The speech model is not on disk");
+                case SpeechModelFormat.Ggml:
+                    break;
+                default:
+                    throw new SpeechException(SpeechError.ModelUnsupported, "The speech model is not a whisper.cpp (ggml) file");
+            }
+
+            long started = Stopwatch.GetTimestamp();
+            try
+            {
+                // Flash attention: faster, and less memory on the graphics card
+                _factory = WhisperFactory.FromPath(
+                    options.ModelPath, new WhisperFactoryOptions { UseGpu = onGpu, UseFlashAttention = true });
+                _factory.CreateBuilder(); // Whisper.net loads the model on first use: now, so that a bad file fails here
+            }
+            catch (WhisperModelLoadException ex)
+            {
                 Free();
-                switch (SpeechModelFile.Check(options.ModelPath))
-                {
-                    case SpeechModelFormat.Missing:
-                        throw new SpeechException(SpeechError.ModelMissing, "The speech model is not on disk");
-                    case SpeechModelFormat.Ggml:
-                        break;
-                    default:
-                        throw new SpeechException(SpeechError.ModelUnsupported, "The speech model is not a whisper.cpp (ggml) file");
-                }
-
-                long started = Stopwatch.GetTimestamp();
-                try
-                {
-                    _factory = WhisperFactory.FromPath(options.ModelPath, new WhisperFactoryOptions { UseGpu = onGpu });
-                    _processor = _factory.CreateBuilder()
-                        .WithLanguage(options.Language)
-                        .WithNoContext()
-                        .WithThreads(Math.Clamp(Environment.ProcessorCount, 1, 8))
-                        .Build();
-                }
-                catch (WhisperModelLoadException ex)
-                {
-                    Free();
-                    throw new SpeechException(SpeechError.ModelUnsupported, ex.Message, ex);
-                }
-
-                _loadedModel = options.ModelPath;
-                _loadedOnGpu = onGpu;
-                _language = options.Language;
-                AppLog.Info($"Speech model {Path.GetFileName(options.ModelPath)} loaded in " +
-                    $"{Stopwatch.GetElapsedTime(started).TotalSeconds:0.0} s ({(onGpu ? "GPU" : "CPU")})");
+                throw new SpeechException(SpeechError.ModelUnsupported, ex.Message, ex);
             }
-            else if (_language != options.Language)
+
+            _loadedModel = options.ModelPath;
+            _loadedOnGpu = onGpu;
+            AppLog.Info($"Speech model {Path.GetFileName(options.ModelPath)} loaded in " +
+                $"{Stopwatch.GetElapsedTime(started).TotalSeconds:0.0} s ({(onGpu ? "GPU" : "CPU")})");
+        }
+
+        /// <summary>
+        /// A processor encodes a fixed audio context (<see cref="WhisperAudioContext"/>), so another one is built when a
+        /// phrase needs a different one. One at a time: each holds buffers of its own, on the graphics card too.
+        /// </summary>
+        private WhisperProcessor GetProcessor(SpeechOptions options, int audioContext)
+        {
+            EnsureModelLoaded(options);
+            if (_processor != null && _processorContext == audioContext)
             {
-                _processor.ChangeLanguage(options.Language);
-                _language = options.Language;
+                if (_language != options.Language)
+                {
+                    _processor.ChangeLanguage(options.Language);
+                    _language = options.Language;
+                }
+                return _processor;
             }
+
+            FreeProcessor();
+            long started = Stopwatch.GetTimestamp();
+            WhisperProcessorBuilder builder = _factory!.CreateBuilder()
+                .WithLanguage(options.Language)
+                .WithNoContext()
+                .WithThreads(Math.Clamp(Environment.ProcessorCount, 1, 8));
+            if (audioContext < WhisperAudioContext.Full)
+                builder.WithAudioContextSize(audioContext);
+            _processor = builder.Build();
+            _processorContext = audioContext;
+            _language = options.Language;
+            AppLog.Info($"Speech processor for audio context {audioContext} ready in " +
+                $"{Stopwatch.GetElapsedTime(started).TotalMilliseconds:0} ms");
             return _processor;
         }
 
-        private void Free()
+        private void FreeProcessor()
         {
             try
             {
                 _processor?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                AppLog.Error("Could not free the speech processor", ex);
+            }
+            _processor = null;
+            _processorContext = 0;
+        }
+
+        private void Free()
+        {
+            FreeProcessor();
+            try
+            {
                 _factory?.Dispose();
             }
             catch (Exception ex)
             {
                 AppLog.Error("Could not free the speech model", ex);
             }
-            _processor = null;
             _factory = null;
             _loadedModel = null;
             _warmedUp = false;
@@ -326,11 +365,19 @@ namespace MovaCore.Services
             return fma && avx && f16c && avx2 && osxsave && (GetEnabledXStateFeatures() & XSTATE_MASK_AVX) != 0;
         }
 
-        // whisper.cpp reports loading details at Info level; warnings and errors help when a model does not load.
-        // It never logs the recognized text unless asked to.
+        // Warnings and errors help when a model does not load; the device and its buffers tell why recognition is slow
+        // on a given computer (ggml names the Vulkan device at Debug level). Loading details are left out, and
+        // whisper.cpp never logs the recognized text unless asked to.
         private static void OnNativeLog(WhisperLogLevel level, string? message)
         {
-            if (level is WhisperLogLevel.Error or WhisperLogLevel.Warning && !string.IsNullOrWhiteSpace(message))
+            if (string.IsNullOrWhiteSpace(message)) return;
+            bool problem = level is WhisperLogLevel.Error or WhisperLogLevel.Warning;
+            bool device = level is WhisperLogLevel.Info or WhisperLogLevel.Debug
+                && (message.Contains("vulkan", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("backend", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("buffer", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("flash", StringComparison.OrdinalIgnoreCase));
+            if (problem || device)
                 AppLog.Info("whisper.cpp: " + message.Trim());
         }
 

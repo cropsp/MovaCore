@@ -272,6 +272,14 @@ namespace MovaCore
             "Much faster with NVIDIA, AMD or Intel graphics. A change takes effect after restarting MovaCore.",
             "Набагато швидше з відеокартами NVIDIA, AMD чи Intel. Зміна діє після перезапуску MovaCore.");
 
+        public static string SpeechFastRecognition => T(
+            "Faster recognition of short phrases (experimental)",
+            "Швидше розпізнавання коротких фраз (експериментально)");
+
+        public static string SpeechFastRecognitionTooltip => T(
+            "Whisper processes only as much audio as the phrase takes instead of 30 seconds: several times faster, especially on slower computers, though possibly a little less accurate.",
+            "Whisper обробляє лише стільки звуку, скільки триває фраза, а не 30 секунд: у рази швидше, особливо на слабших комп'ютерах, хоча, можливо, трохи менш точно.");
+
         public static string SpeechUseGpuUnavailable => T("Not available on ARM devices.", "Недоступно на пристроях ARM.");
         public static string SpeechShowOverlay => T("Show the recording indicator", "Показувати індикатор запису");
 

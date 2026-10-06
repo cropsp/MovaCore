@@ -61,6 +61,7 @@ namespace MovaCore.UI
         private readonly ComboBox _speechLanguageComboBox = new();
         private readonly ComboBox _microphoneComboBox = new();
         private readonly CheckBox _useGpuCheckBox = new();
+        private readonly CheckBox _fastRecognitionCheckBox = new();
         private readonly CheckBox _overlayCheckBox = new();
         private readonly Button _saveButton = new();
         private readonly Button _cancelButton = new();
@@ -396,6 +397,8 @@ namespace MovaCore.UI
             {
                 _toolTip.SetToolTip(_useGpuCheckBox, Strings.SpeechUseGpuTooltip);
             }
+            ConfigureCheckBox(_fastRecognitionCheckBox, Strings.SpeechFastRecognition, _settings.SpeechFastRecognition);
+            _toolTip.SetToolTip(_fastRecognitionCheckBox, Strings.SpeechFastRecognitionTooltip);
             ConfigureCheckBox(_overlayCheckBox, Strings.SpeechShowOverlay, _settings.SpeechShowOverlay);
 
             return CreateGroup(
@@ -403,6 +406,7 @@ namespace MovaCore.UI
                 CreateLabeledRow(new Label { Text = Strings.SpeechLanguageLabel }, _speechLanguageComboBox),
                 CreateLabeledRow(new Label { Text = Strings.SpeechMicrophoneLabel }, _microphoneComboBox),
                 _useGpuCheckBox,
+                _fastRecognitionCheckBox,
                 _overlayCheckBox);
         }
 
@@ -590,7 +594,8 @@ namespace MovaCore.UI
             bool enabled = _speechEnabledCheckBox.Checked;
             foreach (Control control in new Control[]
             {
-                _speechPicker, _modelComboBox, _customModelRow, _speechLanguageComboBox, _microphoneComboBox, _overlayCheckBox,
+                _speechPicker, _modelComboBox, _customModelRow, _speechLanguageComboBox, _microphoneComboBox,
+                _fastRecognitionCheckBox, _overlayCheckBox,
             })
             {
                 control.Enabled = enabled;
@@ -769,6 +774,7 @@ namespace MovaCore.UI
                 SpeechUseGpu = RuntimeInformation.ProcessArchitecture == Architecture.Arm64
                     ? _settings.SpeechUseGpu
                     : _useGpuCheckBox.Checked,
+                SpeechFastRecognition = _fastRecognitionCheckBox.Checked,
                 SpeechShowOverlay = _overlayCheckBox.Checked,
             };
         }

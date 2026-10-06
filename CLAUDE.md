@@ -125,7 +125,13 @@ Dictation (hold-to-talk) reuses the hook, the clipboard service and the paste:
   (`RuntimeOptions.ForcedRuntimeLibrary`): Vulkan if the GPU option is on and `vulkan-1.dll` loads (with
   `VK_LOADER_LAYERS_DISABLE=~implicit~`: overlay layers crash Vulkan apps), else the CPU, and on x64 only after an
   AVX2/FMA/F16C check (ggml's CPU code dies with an illegal instruction without them). A model loaded on the GPU gets
-  one warm-up run (shader compilation). It is also the `ISpeechDetector`: whisper.cpp's Silero VAD with
+  one warm-up run (shader compilation), and every model loads with flash attention. Whisper encodes a 30-s window
+  (1500 positions) however short the phrase, which takes many seconds on a weak computer; with
+  `SpeechFastRecognition` (experimental, on by default) a phrase is encoded with the audio context
+  `WhisperAudioContext.For` its length (steps of 5.12 s after a 1 s margin, whisper.cpp's `audio_ctx`). A processor
+  is built per audio context (Whisper.net fixes it at `Build`), one at a time since each holds its own buffers.
+  `OnNativeLog` keeps whisper.cpp's warnings and errors plus ggml's device lines (Vulkan device, buffers). It is also
+  the `ISpeechDetector`: whisper.cpp's Silero VAD with
   `models\ggml-silero-v6.2.0.bin` next to the exe, which `eng/get-vad-model.ps1` puts into the publish output (CI and
   `publish.ps1`; a plain `dotnet build` has none, so the energy threshold is used).
 - **`Services/ModelDownloader.cs`** is the only network code: it downloads a `SpeechModelCatalog` model from

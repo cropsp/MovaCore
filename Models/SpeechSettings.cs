@@ -10,7 +10,8 @@ namespace MovaCore.Models
         string Language,
         bool UseGpu,
         string? MicrophoneId,
-        bool RestoreClipboard)
+        bool RestoreClipboard,
+        bool FastRecognition = false)
     {
         public static SpeechSettings Disabled { get; } = new(false, null, SpeechLanguages.Auto, false, null, true);
     }

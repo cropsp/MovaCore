@@ -53,6 +53,12 @@ namespace MovaCore.Models
         /// <summary>Transcribe on the GPU through Vulkan where available (x64 only).</summary>
         public bool SpeechUseGpu { get; set; } = true;
 
+        /// <summary>
+        /// Encode short phrases with a shorter audio context (<see cref="Services.WhisperAudioContext"/>): several times
+        /// faster, possibly a little less accurate. Experimental.
+        /// </summary>
+        public bool SpeechFastRecognition { get; set; } = true;
+
         /// <summary>Show the small recording indicator near the bottom of the screen.</summary>
         public bool SpeechShowOverlay { get; set; } = true;
 

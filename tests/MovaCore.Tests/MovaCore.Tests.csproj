@@ -58,6 +58,7 @@
     <Compile Include="../../Services/DictationContext.cs" Link="Linked/DictationContext.cs" />
     <Compile Include="../../Services/TranscriptJoiner.cs" Link="Linked/TranscriptJoiner.cs" />
     <Compile Include="../../Services/AudioSamples.cs" Link="Linked/AudioSamples.cs" />
+    <Compile Include="../../Services/WhisperAudioContext.cs" Link="Linked/WhisperAudioContext.cs" />
     <Compile Include="../../Services/TranscriptText.cs" Link="Linked/TranscriptText.cs" />
     <Compile Include="../../Services/SpeechModelFile.cs" Link="Linked/SpeechModelFile.cs" />
     <Compile Include="../../Services/SpeechModelCatalog.cs" Link="Linked/SpeechModelCatalog.cs" />
