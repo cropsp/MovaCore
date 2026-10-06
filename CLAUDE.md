@@ -133,7 +133,11 @@ Dictation (hold-to-talk) reuses the hook, the clipboard service and the paste:
   `ModelDownloadManager` runs one download in the background; enabling dictation starts it (and startup resumes it),
   except for a model the user deleted (`Delete`, the Voice tab's button) in this session.
 - `TrayApplicationContext` swaps the tray icon (red/amber dot) and drives `UI/RecordingOverlay.cs`, a click-through
-  window that never takes the focus (`WS_EX_NOACTIVATE`, `ShowWithoutActivation`). It draws `UI/MouseScene.cs`: the
+  window that never takes the focus (`WS_EX_NOACTIVATE`, `ShowWithoutActivation`). It is a layered window with
+  per-pixel alpha: each frame (`RenderFrame`, a capsule with a soft shadow on a transparent bitmap) goes to
+  `UpdateLayeredWindow`, and fades set its constant alpha. Never set `Opacity` or `TransparencyKey` on it (WinForms
+  would call `SetLayeredWindowAttributes`, after which `UpdateLayeredWindow` fails), and draw text with GDI+, not
+  `TextRenderer` (GDI text has no alpha). It draws `UI/MouseScene.cs`: the
   logo's field mouse in grass whose tufts are the equalizer (`SpectrumAnalyzer`, Handy's algorithm), grey with the
   mouse dozing until the microphone delivers, the mouse gnawing wheat if transcribing takes over 0.3 s, a wink when
   pasted, or the mouse's head beside a short message; it fades in and out. The scene was designed as a browser mockup

@@ -2,6 +2,8 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.Drawing.Text;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using MovaCore.Services;
@@ -14,7 +16,9 @@ namespace MovaCore.UI
     /// recording it sits in grass that grows with the voice (grey and dozing until the microphone delivers sound);
     /// while transcribing, if that takes a moment, it gnaws an ear of wheat; it winks when the text is pasted; and it
     /// goes with short messages. It never takes the focus (the text must go to the window the user is typing in) and
-    /// lets clicks through.
+    /// lets clicks through. A layered window with per-pixel alpha (UpdateLayeredWindow) gives it the shape of a real
+    /// capsule with smooth edges and a soft shadow, the same on Windows 10 and 11; WinForms painting and the Opacity
+    /// property are not used, since SetLayeredWindowAttributes would stop UpdateLayeredWindow from working.
     /// </summary>
     internal sealed partial class RecordingOverlay : Form
     {
@@ -25,8 +29,10 @@ namespace MovaCore.UI
         private const int BottomGap = 56;
         private const int EdgePadding = 14;
         private const int MessageHeadWidth = 40; // the mouse's head left of a message
+        private const int ShadowMargin = 6; // room around the capsule for its shadow
+        private const float TextSize = 13.3f; // 10 pt
 
-        private const double MaxOpacity = 0.94; // below 1 also keeps the window layered, which click-through needs
+        private const double MaxOpacity = 0.94;
         private const double FadeInMs = 120, FadeOutMs = 200;
 
         /// <summary>A quick transcription shows no animation at all, only a slower one does.</summary>
@@ -35,15 +41,17 @@ namespace MovaCore.UI
         private const int WS_EX_TOPMOST = 0x00000008;
         private const int WS_EX_TRANSPARENT = 0x00000020;
         private const int WS_EX_TOOLWINDOW = 0x00000080;
+        private const int WS_EX_LAYERED = 0x00080000;
         private const int WS_EX_NOACTIVATE = 0x08000000;
-        private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
-        private const int DWMWCP_ROUND = 2;
         private static readonly IntPtr HWND_TOPMOST = new(-1);
         private const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOACTIVATE = 0x0010;
+        private const uint ULW_ALPHA = 0x00000002;
+        private const byte AC_SRC_OVER = 0x00, AC_SRC_ALPHA = 0x01;
 
         private static readonly Color Background = Color.FromArgb(30, 30, 32);
+        private static readonly Color Edge = Color.FromArgb(18, 255, 255, 255);
+        private static readonly Color TextColor = Color.FromArgb(251, 244, 226);
 
-        private readonly Font _font = new("Segoe UI", 10F, FontStyle.Regular);
         private readonly Func<float[], int> _recentAudio;
         private readonly float[] _samples = new float[SpectrumAnalyzer.WindowSize];
         private readonly SpectrumAnalyzer _spectrum = new();
@@ -60,7 +68,11 @@ namespace MovaCore.UI
         private double _fadeFrom;
         private bool _fadingOut;
         private double _lastTick;
+        private double _opacity; // of the whole window, faded in and out
         private MouseScene.Pose _messagePose = MouseScene.Pose.Calm;
+        private Font? _textFont; // for the current DPI
+        private int _textFontDpi;
+        private bool _layeringFailed;
 
         /// <param name="recentAudio">
         /// Fills the buffer with the latest audio and returns how much of it is real (0 until the microphone delivers);
@@ -75,11 +87,7 @@ namespace MovaCore.UI
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
             BackColor = Background;
-            ForeColor = Color.White;
-            Font = _font;
-            Size = new Size(PillWidth, PillHeight);
-            Opacity = MaxOpacity;
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
+            Size = new Size(PillWidth + 2 * ShadowMargin, PillHeight + 2 * ShadowMargin);
 
             _animation.Tick += OnAnimationTick;
             _hideTimer.Tick += (_, _) => HideOverlay();
@@ -101,7 +109,7 @@ namespace MovaCore.UI
             get
             {
                 CreateParams cp = base.CreateParams;
-                cp.ExStyle |= WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT;
+                cp.ExStyle |= WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED;
                 return cp;
             }
         }
@@ -157,10 +165,9 @@ namespace MovaCore.UI
             {
                 // Placed on the right monitor before it shows, so that WinForms scales it for that monitor's DPI
                 Location = new Point(_area.Left + _area.Width / 2, _area.Bottom - LogicalToDeviceUnits(BottomGap));
-                Opacity = 0.01; // not 0: a fully transparent layered window may not get painted before the fade
-                Show(); // without activation, see ShowWithoutActivation
+                _opacity = 0;
+                Show(); // without activation (see ShowWithoutActivation), and invisible until the first frame
                 SetWindowPos(Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-                RoundCorners();
                 StartFade(fadeOut: false);
             }
             else if (_fadingOut)
@@ -170,13 +177,13 @@ namespace MovaCore.UI
             Relayout();
 
             _animation.Start();
-            Invalidate();
+            Render();
         }
 
         private void StartFade(bool fadeOut)
         {
             _fadingOut = fadeOut;
-            _fadeFrom = Opacity;
+            _fadeFrom = _opacity;
             _fadeStarted = Stopwatch.GetTimestamp();
             _animation.Start();
         }
@@ -196,52 +203,65 @@ namespace MovaCore.UI
                     Hide();
                     return;
                 }
-                Opacity = Math.Max(0.01, _fadeFrom * (1 - progress));
+                _opacity = _fadeFrom * (1 - progress);
             }
-            else if (Opacity < MaxOpacity)
+            else if (_opacity < MaxOpacity)
             {
                 double progress = Math.Min(1, elapsed / FadeInMs);
-                Opacity = _fadeFrom + (MaxOpacity - _fadeFrom) * progress;
+                _opacity = _fadeFrom + (MaxOpacity - _fadeFrom) * progress;
             }
         }
 
-        // Bottom center of the working area; a message gets as wide as its text needs
+        // The capsule at the bottom center of the working area, with room around it for the shadow; a message gets
+        // as wide as its text needs
         private void Relayout()
         {
             int width = LogicalToDeviceUnits(PillWidth);
             if (_mode == Mode.Message)
             {
-                int textWidth = TextRenderer.MeasureText(_text, Font).Width + LogicalToDeviceUnits(MessageHeadWidth + 2 * EdgePadding);
+                using var measuring = new Bitmap(1, 1);
+                using Graphics g = Graphics.FromImage(measuring);
+                int textWidth = (int)Math.Ceiling(g.MeasureString(_text, TextFont()).Width) +
+                    LogicalToDeviceUnits(MessageHeadWidth + 2 * EdgePadding);
                 width = Math.Clamp(textWidth, LogicalToDeviceUnits(PillWidth), LogicalToDeviceUnits(MaxMessageWidth));
             }
             int height = LogicalToDeviceUnits(PillHeight);
+            int margin = LogicalToDeviceUnits(ShadowMargin);
             Bounds = new Rectangle(
-                _area.Left + (_area.Width - width) / 2,
-                _area.Bottom - LogicalToDeviceUnits(BottomGap) - height,
-                width,
-                height);
+                _area.Left + (_area.Width - width) / 2 - margin,
+                _area.Bottom - LogicalToDeviceUnits(BottomGap) - height - margin,
+                width + 2 * margin,
+                height + 2 * margin);
         }
 
         protected override void OnDpiChanged(DpiChangedEventArgs e)
         {
             base.OnDpiChanged(e);
-            if (_mode != Mode.Hidden) Relayout();
+            if (_mode == Mode.Hidden) return;
+            Relayout();
+            Render();
         }
 
-        private void RoundCorners()
+        // GDI+ text in pixels: GDI's TextRenderer would draw transparent text into a frame with alpha
+        private Font TextFont()
         {
-            // Windows 11 rounds the corners of a borderless window on request; Windows 10 keeps them square
-            int preference = DWMWCP_ROUND;
-            _ = DwmSetWindowAttribute(Handle, DWMWA_WINDOW_CORNER_PREFERENCE, ref preference, sizeof(int));
+            if (_textFont == null || _textFontDpi != DeviceDpi)
+            {
+                _textFont?.Dispose();
+                _textFont = new Font("Segoe UI", TextSize * DeviceDpi / 96f, FontStyle.Regular, GraphicsUnit.Pixel);
+                _textFontDpi = DeviceDpi;
+            }
+            return _textFont;
         }
 
         private void OnAnimationTick(object? sender, EventArgs e)
         {
             UpdateFade();
             if (!Visible) return;
-            if (_mode == Mode.Message && !_fadingOut && Opacity >= MaxOpacity)
+            if (_mode == Mode.Message && !_fadingOut && _opacity >= MaxOpacity)
             {
                 _animation.Stop(); // a message does not move
+                Render();
                 return;
             }
 
@@ -259,7 +279,7 @@ namespace MovaCore.UI
             double now = _clock.Elapsed.TotalMilliseconds;
             _scene.Update(Math.Min(100, now - _lastTick), CurrentPose(), _spectrum.Levels, now);
             _lastTick = now;
-            Invalidate();
+            Render();
         }
 
         private MouseScene.Pose CurrentPose() => _mode switch
@@ -272,30 +292,105 @@ namespace MovaCore.UI
             _ => _messagePose,
         };
 
-        protected override void OnPaint(PaintEventArgs e)
+        /// <summary>The window's current picture: the capsule and its shadow on a transparent background.</summary>
+        internal Bitmap RenderFrame()
         {
-            Graphics g = e.Graphics;
-            g.Clear(Background);
-            if (_mode == Mode.Hidden) return;
+            var frame = new Bitmap(Math.Max(1, Width), Math.Max(1, Height), PixelFormat.Format32bppPArgb);
+            using Graphics g = Graphics.FromImage(frame);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.Clear(Color.Transparent);
+            if (_mode == Mode.Hidden) return frame;
 
-            double now = _clock.Elapsed.TotalMilliseconds;
-            float scale = ClientSize.Height / MouseScene.Height;
-            if (_mode == Mode.Message)
+            float scale = DeviceDpi / 96f;
+            float margin = LogicalToDeviceUnits(ShadowMargin);
+            var pill = new RectangleF(margin, margin, Width - 2 * margin, Height - 2 * margin);
+
+            // A soft shadow: a few larger, fainter capsules a little lower
+            for (int i = 4; i >= 1; i--)
             {
-                GraphicsState state = g.Save();
-                g.ScaleTransform(scale, scale);
-                _scene.DrawHead(g, EdgePadding + 10, MouseScene.Height / 2 + 3, 0.85f, _messagePose, now);
-                g.Restore(state);
-
-                int left = LogicalToDeviceUnits(EdgePadding + MessageHeadWidth);
-                var bounds = new Rectangle(left, 0, ClientSize.Width - left - LogicalToDeviceUnits(EdgePadding), ClientSize.Height);
-                TextRenderer.DrawText(g, _text, Font, bounds, ForeColor,
-                    TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
-                return;
+                RectangleF spread = pill;
+                spread.Inflate(i * scale, i * scale);
+                spread.Offset(0, 1.5f * scale);
+                using GraphicsPath shadow = Capsule(spread);
+                using var shade = new SolidBrush(Color.FromArgb(8 + (4 - i) * 7, 0, 0, 0));
+                g.FillPath(shade, shadow);
             }
 
-            g.ScaleTransform(scale, scale);
-            _scene.Draw(g, CurrentPose(), now, recordingDot: true);
+            using GraphicsPath capsule = Capsule(pill);
+            using (var fill = new SolidBrush(Background)) g.FillPath(fill, capsule);
+            using (var edge = new Pen(Edge, scale)) g.DrawPath(edge, capsule);
+            g.SetClip(capsule);
+
+            double now = _clock.Elapsed.TotalMilliseconds;
+            float sceneScale = pill.Height / MouseScene.Height;
+            g.TranslateTransform(pill.X, pill.Y);
+            g.ScaleTransform(sceneScale, sceneScale);
+            if (_mode != Mode.Message)
+            {
+                _scene.Draw(g, CurrentPose(), now, recordingDot: true);
+                return frame;
+            }
+
+            _scene.DrawHead(g, EdgePadding + 10, MouseScene.Height / 2 + 3, 0.85f, _messagePose, now);
+            g.ResetTransform();
+            float left = pill.X + LogicalToDeviceUnits(EdgePadding + MessageHeadWidth);
+            var bounds = new RectangleF(left, pill.Y, pill.Right - LogicalToDeviceUnits(EdgePadding) - left, pill.Height);
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            using var format = new StringFormat(StringFormatFlags.NoWrap)
+            {
+                LineAlignment = StringAlignment.Center,
+                Trimming = StringTrimming.EllipsisCharacter,
+            };
+            using var text = new SolidBrush(TextColor);
+            g.DrawString(_text, TextFont(), text, bounds, format);
+            return frame;
+        }
+
+        private static GraphicsPath Capsule(RectangleF r)
+        {
+            var path = new GraphicsPath();
+            float d = Math.Min(r.Height, r.Width);
+            path.AddArc(r.X, r.Y, d, d, 90, 180);
+            path.AddArc(r.Right - d, r.Y, d, d, 270, 180);
+            path.CloseFigure();
+            return path;
+        }
+
+        // Hands the frame to the window: its alpha shapes the window, and the fade sets the overall opacity
+        private void Render()
+        {
+            if (!IsHandleCreated || !Visible) return;
+            using Bitmap frame = RenderFrame();
+            IntPtr screen = GetDC(IntPtr.Zero);
+            IntPtr memory = CreateCompatibleDC(screen);
+            IntPtr bitmap = frame.GetHbitmap(Color.FromArgb(0));
+            IntPtr previous = SelectObject(memory, bitmap);
+            try
+            {
+                var size = new NativeSize { Width = frame.Width, Height = frame.Height };
+                var source = new NativePoint();
+                var position = new NativePoint { X = Left, Y = Top };
+                var blend = new BlendFunction
+                {
+                    BlendOp = AC_SRC_OVER,
+                    SourceConstantAlpha = (byte)Math.Round(255 * Math.Clamp(_opacity, 0, 1)),
+                    AlphaFormat = AC_SRC_ALPHA,
+                };
+                if (!UpdateLayeredWindow(Handle, screen, ref position, ref size, memory, ref source, 0, ref blend, ULW_ALPHA)
+                    && !_layeringFailed)
+                {
+                    _layeringFailed = true; // once: every frame would fail the same way
+                    AppLog.Error($"The recording indicator could not be drawn (error {Marshal.GetLastPInvokeError()})");
+                }
+            }
+            finally
+            {
+                SelectObject(memory, previous);
+                DeleteObject(bitmap);
+                DeleteDC(memory);
+                _ = ReleaseDC(IntPtr.Zero, screen);
+            }
         }
 
         protected override void Dispose(bool disposing)
@@ -305,7 +400,7 @@ namespace MovaCore.UI
                 _animation.Dispose();
                 _hideTimer.Dispose();
                 _scene.Dispose();
-                _font.Dispose();
+                _textFont?.Dispose();
             }
             base.Dispose(disposing);
         }
@@ -314,7 +409,52 @@ namespace MovaCore.UI
         [return: MarshalAs(UnmanagedType.Bool)]
         private static partial bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
 
-        [LibraryImport("dwmapi.dll")]
-        private static partial int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+        [LibraryImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static partial bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref NativePoint pptDst, ref NativeSize psize,
+            IntPtr hdcSrc, ref NativePoint pptSrc, int crKey, ref BlendFunction pblend, uint dwFlags);
+
+        [LibraryImport("user32.dll")]
+        private static partial IntPtr GetDC(IntPtr hWnd);
+
+        [LibraryImport("user32.dll")]
+        private static partial int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+        [LibraryImport("gdi32.dll")]
+        private static partial IntPtr CreateCompatibleDC(IntPtr hdc);
+
+        [LibraryImport("gdi32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static partial bool DeleteDC(IntPtr hdc);
+
+        [LibraryImport("gdi32.dll")]
+        private static partial IntPtr SelectObject(IntPtr hdc, IntPtr h);
+
+        [LibraryImport("gdi32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static partial bool DeleteObject(IntPtr ho);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativePoint
+        {
+            public int X;
+            public int Y;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativeSize
+        {
+            public int Width;
+            public int Height;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct BlendFunction
+        {
+            public byte BlendOp;
+            public byte BlendFlags;
+            public byte SourceConstantAlpha;
+            public byte AlphaFormat;
+        }
     }
 }

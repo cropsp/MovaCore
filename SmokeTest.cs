@@ -227,23 +227,24 @@ namespace MovaCore
             overlay.ShowRecording();
             if (!overlay.Visible) AppLog.Error("Smoke test: the recording indicator did not show");
             await Task.Delay(250);
-            using Bitmap waiting = Render(overlay);
+            using Bitmap waiting = overlay.RenderFrame();
             sound = true;
             await Task.Delay(400);
-            using Bitmap speaking = Render(overlay);
+            using Bitmap speaking = overlay.RenderFrame();
             if (SameImage(waiting, speaking)) AppLog.Error("Smoke test: the recording indicator did not react to sound");
+            CheckCapsuleShape(overlay, speaking);
 
             overlay.ShowTranscribing();
             await Task.Delay(450); // the mouse gnaws its wheat after a delay
-            Render(overlay).Dispose();
+            overlay.RenderFrame().Dispose();
             overlay.ShowPasted();
             await Task.Delay(150);
-            Render(overlay).Dispose();
+            overlay.RenderFrame().Dispose();
             foreach (MouseScene.Pose pose in new[] { MouseScene.Pose.Puzzled, MouseScene.Pose.Straining, MouseScene.Pose.Calm })
             {
                 overlay.ShowMessage(Strings.OverlayNoSignal, pose);
                 await Task.Delay(150);
-                Render(overlay).Dispose();
+                overlay.RenderFrame().Dispose();
             }
             if (GetForegroundWindow() != foregroundBefore) AppLog.Error("Smoke test: the recording indicator took the focus");
 
@@ -280,11 +281,18 @@ namespace MovaCore
             AppLog.Info("Smoke test: click watching checked");
         }
 
-        private static Bitmap Render(Control control)
+        // The indicator is a capsule with a transparent background: clear just inside the window's corner, where only a
+        // rectangle would reach, and solid in the middle and inside the rounded end
+        private static void CheckCapsuleShape(Control overlay, Bitmap frame)
         {
-            var bitmap = new Bitmap(control.Width, control.Height);
-            control.DrawToBitmap(bitmap, new Rectangle(Point.Empty, control.Size));
-            return bitmap;
+            int margin = overlay.LogicalToDeviceUnits(6);
+            int corner = frame.GetPixel(margin + 2, margin + 2).A;
+            int middle = frame.GetPixel(frame.Width / 2, frame.Height / 2).A;
+            int roundEnd = frame.GetPixel(margin + overlay.LogicalToDeviceUnits(4), frame.Height / 2).A;
+            if (corner != 0 || middle != 255 || roundEnd != 255)
+                AppLog.Error($"Smoke test: the recording indicator is not a capsule (corner {corner}, middle {middle}, end {roundEnd})");
+            else
+                AppLog.Info("Smoke test: the recording indicator is a capsule");
         }
 
         private static bool SameImage(Bitmap a, Bitmap b)
