@@ -17,6 +17,9 @@ namespace MovaCore
         static void Main(string[] args)
         {
             bool smokeTest = args.Contains("--smoke-test");
+            // A small whisper.cpp model and a recording of "hello world" for the smoke test to transcribe (CI provides them)
+            string? smokeTestModel = ArgumentValue(args, "--smoke-test-model");
+            string? smokeTestAudio = ArgumentValue(args, "--smoke-test-audio");
 
             AppLog.Initialize(Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MovaCore", "logs"));
@@ -62,17 +65,28 @@ namespace MovaCore
 
             // Composition root: a handful of long-lived objects wired by hand (no DI container to trim under AOT).
             // The clipboard service creates its owner window here, on the UI thread whose message loop serves it.
+            // Disposed in reverse order: dictation stops before the clipboard and the hook it uses go away.
             var converter = KeyboardLayouts.CreateConverter();
             var layouts = new KeyboardLayouts();
             using var hotkeys = new HotkeyService();
             using var clipboard = new ClipboardService();
-            var orchestrator = new HotkeyOrchestrator(hotkeys, converter, clipboard, layouts);
+            var clipboardGate = new ClipboardGate();
+            var orchestrator = new HotkeyOrchestrator(hotkeys, converter, clipboard, layouts, clipboardGate);
+            using var recorder = new WasapiAudioRecorder();
+            using var recognizer = new WhisperSpeechRecognizer();
+            using var dictationTarget = new WindowsDictationTarget(hotkeys);
+            using var dictationContext = new DictationContext(dictationTarget);
+            using var speech = new SpeechOrchestrator(
+                recorder, recognizer, new TextPaster(hotkeys, clipboard, clipboardGate), recognizer, dictationContext);
+            using var downloader = new ModelDownloader();
+            using var downloads = new ModelDownloadManager(downloader, SpeechModelCatalog.DefaultModelsDirectory);
             var settings = new SettingsService(new StartupRegistration());
-            using var context = new TrayApplicationContext(hotkeys, orchestrator, settings);
+            using var context = new TrayApplicationContext(hotkeys, orchestrator, settings, speech, recorder, downloads);
 
             if (smokeTest)
             {
-                SmokeTest.Schedule(context, clipboard, converter, hotkeys);
+                SmokeTest.Schedule(
+                    context, clipboard, converter, hotkeys, recorder, downloader, downloads, smokeTestModel, smokeTestAudio);
             }
 
             Application.Run(context);
@@ -84,6 +98,12 @@ namespace MovaCore
                 Environment.ExitCode = passed ? 0 : 1;
             }
             AppLog.Info("MovaCore exited");
+        }
+
+        private static string? ArgumentValue(string[] args, string name)
+        {
+            int index = Array.IndexOf(args, name);
+            return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
         }
 
         private static void RegisterExceptionHandlers(bool smokeTest)

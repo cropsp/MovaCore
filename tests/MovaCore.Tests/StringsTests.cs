@@ -1,5 +1,6 @@
 using System.Reflection;
 using MovaCore.Models;
+using MovaCore.Services;
 using Xunit;
 
 namespace MovaCore.Tests
@@ -104,6 +105,79 @@ namespace MovaCore.Tests
             Assert.Contains("the reason", Strings.BalloonUnexpectedError("the reason"));
             Assert.Contains("the reason", Strings.SettingsNotSaved("the reason"));
             Assert.Contains("1.2.3", Strings.AboutText("1.2.3"));
+            Assert.Contains("ScrollLock", Strings.BalloonModelReady("ScrollLock"));
+            Assert.Contains("the reason", Strings.BalloonModelDownloadFailed("the reason"));
+            Assert.Contains("the reason", Strings.SpeechModelDownloadFailed("the reason"));
+            Assert.Contains("874", Strings.SpeechModelNotDownloaded("874 MB"));
+            Assert.Contains("42", Strings.TrayTooltipDownloading(42));
+            Assert.Contains("42", Strings.SpeechModelStillDownloading(42));
+            Assert.Contains("the detail", Strings.SpeechErrorText(SpeechError.Failed, "the detail"));
+
+            string downloading = Strings.SpeechModelDownloading("312 MB", "874 MB", 35);
+            Assert.Contains("312 MB", downloading);
+            Assert.Contains("874 MB", downloading);
+            Assert.Contains("35", downloading);
+        }
+
+        [Theory]
+        [MemberData(nameof(Languages))]
+        public void EverySpeechError_HasAText(UiLanguage language)
+        {
+            Strings.Language = language;
+
+            foreach (SpeechError error in Enum.GetValues<SpeechError>())
+                Assert.False(string.IsNullOrWhiteSpace(Strings.SpeechErrorText(error, null)), error.ToString());
+            foreach (ModelDownloadError error in Enum.GetValues<ModelDownloadError>())
+                Assert.False(string.IsNullOrWhiteSpace(Strings.DownloadErrorText(error)), error.ToString());
+        }
+
+        [Fact]
+        public void SpeechErrors_AreTranslated()
+        {
+            foreach (SpeechError error in Enum.GetValues<SpeechError>())
+            {
+                Strings.Language = UiLanguage.English;
+                string english = Strings.SpeechErrorText(error, null);
+                Strings.Language = UiLanguage.Ukrainian;
+                Assert.NotEqual(english, Strings.SpeechErrorText(error, null));
+            }
+        }
+
+        [Theory]
+        [MemberData(nameof(Languages))]
+        public void EverySpeechLanguage_HasAName(UiLanguage language)
+        {
+            Strings.Language = language;
+
+            foreach (string code in SpeechLanguages.Codes)
+            {
+                string name = Strings.SpeechLanguageName(code);
+                Assert.False(string.IsNullOrWhiteSpace(name));
+                Assert.NotEqual(code, name);
+            }
+        }
+
+        [Theory]
+        [MemberData(nameof(Languages))]
+        public void EveryCatalogModel_HasADistinctName(UiLanguage language)
+        {
+            Strings.Language = language;
+
+            string[] names = SpeechModelCatalog.Models.Select(Strings.SpeechModelName).ToArray();
+            Assert.Equal(names.Length, names.Distinct().Count());
+            Assert.All(names, name => Assert.StartsWith("Large v3 Turbo", name));
+        }
+
+        [Theory]
+        [InlineData(UiLanguage.English, 874_200_000, "874 MB")]
+        [InlineData(UiLanguage.English, 1_624_600_000, "1.6 GB")]
+        [InlineData(UiLanguage.Ukrainian, 573_600_000, "574 МБ")]
+        [InlineData(UiLanguage.Ukrainian, 1_624_600_000, "1,6 ГБ")]
+        public void FormatSize_UsesTheLanguagesUnitsAndSeparator(UiLanguage language, long bytes, string expected)
+        {
+            Strings.Language = language;
+
+            Assert.Equal(expected, Strings.FormatSize(bytes));
         }
 
         [Fact]

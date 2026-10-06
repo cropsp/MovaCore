@@ -5,6 +5,40 @@ All notable changes to MovaCore are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-06
+
+### Added
+- Voice input: hold the dictation hotkey (ScrollLock by default), speak and release, and the speech is recognized
+  locally with Whisper and pasted into the focused application; the clipboard is restored afterwards. Settings:
+  language, microphone, graphics card (Vulkan, x64) and the recording indicator.
+- Turning voice input on downloads the speech model (Whisper Large v3 Turbo q8_0, 874 MB; the full-precision and a
+  smaller variant can be chosen, or a whisper.cpp model file of your own) in the background, checks it against its
+  hash and resumes an interrupted download at the next start. This is the only network connection MovaCore makes.
+- While dictating, the tray icon shows a red dot (amber while recognizing), and a small indicator at the bottom of the
+  screen shows the field mouse from the logo sitting in grass that grows with your voice, without taking the focus.
+  The mouse dozes until the microphone is ready, gnaws an ear of wheat if recognition takes a moment, and winks when
+  the text is pasted.
+- Voice activity detection (Silero VAD, shipped in a `models` folder) decides what is speech: quiet microphones work,
+  silence is not sent to Whisper (which would invent phrases), and pauses are cut out. After a deliberate hold, the
+  indicator says when no speech was heard or the microphone delivered no signal.
+- The microphone stays open for 30 seconds after a dictation, so the next one starts at once and keeps the moment
+  before the key was pressed; recording also goes on for 150 ms after the release, so the last word is not cut off.
+  Meanwhile Windows shows the microphone as in use, and a Bluetooth headset stays in headset mode.
+- Hesitations ("hmm", "хм") and words Whisper repeats in a loop are removed from the text.
+- A phrase dictated right after another one, into the same field and with no key pressed or click in between,
+  continues it: it gets a space, and a small first letter when the previous phrase did not end a sentence.
+- A downloaded speech model can be deleted on the Voice tab (its size is shown). Deleting the model voice input
+  uses turns voice input off; it is not downloaded again on its own.
+
+### Changed
+- The settings window has tabs: Layout, Voice and General. Restoring the clipboard and the copy and paste keys moved
+  to General, since they apply to dictation too.
+- The release archives contain `runtimes` and `models` folders (speech recognition, with the Visual C++ runtime it
+  needs) and `THIRD-PARTY-NOTICES.txt`; the x64 archive is larger mostly because of the Vulkan build of whisper.cpp.
+- The installation instructions say what to do when Windows SmartScreen warns about the program. The
+  [code signing policy](https://github.com/cropsp/MovaCore/blob/main/docs/CODE_SIGNING.md) describes how releases
+  will be signed through SignPath Foundation; this release is not signed yet.
+
 ## [1.1.0] - 2026-10-01
 
 ### Fixed
@@ -43,6 +77,7 @@ All notable changes to MovaCore are documented here. The format follows
 
 - First release.
 
-[Unreleased]: https://github.com/cropsp/MovaCore/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/cropsp/MovaCore/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/cropsp/MovaCore/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/cropsp/MovaCore/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/cropsp/MovaCore/releases/tag/v1.0.0

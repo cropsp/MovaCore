@@ -27,11 +27,50 @@
     <Compile Include="../../Models/UiLanguage.cs" Link="Linked/UiLanguage.cs" />
     <Compile Include="../../Models/KeyboardLanguage.cs" Link="Linked/KeyboardLanguage.cs" />
     <Compile Include="../../Services/HotkeyMatching.cs" Link="Linked/HotkeyMatching.cs" />
+    <Compile Include="../../Services/HotkeyAction.cs" Link="Linked/HotkeyAction.cs" />
+    <Compile Include="../../Services/HotkeyStateTracker.cs" Link="Linked/HotkeyStateTracker.cs" />
+    <Compile Include="../../Services/ClipboardGate.cs" Link="Linked/ClipboardGate.cs" />
     <Compile Include="../../Services/ProcessNames.cs" Link="Linked/ProcessNames.cs" />
     <Compile Include="../../Services/LayoutTableBuilder.cs" Link="Linked/LayoutTableBuilder.cs" />
     <Compile Include="../../Services/IKeyboardLayoutSwitcher.cs" Link="Linked/IKeyboardLayoutSwitcher.cs" />
     <Compile Include="../../Models/SettingsJsonContext.cs" Link="Linked/SettingsJsonContext.cs" />
     <Compile Include="../../Strings.cs" Link="Linked/Strings.cs" />
+    <!-- Dictation -->
+    <Compile Include="../../Models/AudioInputDevice.cs" Link="Linked/AudioInputDevice.cs" />
+    <Compile Include="../../Models/SpeechOptions.cs" Link="Linked/SpeechOptions.cs" />
+    <Compile Include="../../Models/SpeechSettings.cs" Link="Linked/SpeechSettings.cs" />
+    <Compile Include="../../Models/SpeechLanguages.cs" Link="Linked/SpeechLanguages.cs" />
+    <Compile Include="../../Models/SpeechModelInfo.cs" Link="Linked/SpeechModelInfo.cs" />
+    <Compile Include="../../Models/SpeechModelFormat.cs" Link="Linked/SpeechModelFormat.cs" />
+    <Compile Include="../../Models/ModelDownloadProgress.cs" Link="Linked/ModelDownloadProgress.cs" />
+    <Compile Include="../../Models/RemoteFileProbe.cs" Link="Linked/RemoteFileProbe.cs" />
+    <Compile Include="../../Models/ModelDownloadStatus.cs" Link="Linked/ModelDownloadStatus.cs" />
+    <Compile Include="../../Models/ModelDownloadState.cs" Link="Linked/ModelDownloadState.cs" />
+    <Compile Include="../../Services/SpeechError.cs" Link="Linked/SpeechError.cs" />
+    <Compile Include="../../Services/SpeechException.cs" Link="Linked/SpeechException.cs" />
+    <Compile Include="../../Services/IAudioRecorder.cs" Link="Linked/IAudioRecorder.cs" />
+    <Compile Include="../../Services/ISpeechRecognizer.cs" Link="Linked/ISpeechRecognizer.cs" />
+    <Compile Include="../../Services/ISpeechDetector.cs" Link="Linked/ISpeechDetector.cs" />
+    <Compile Include="../../Models/SpeechSegment.cs" Link="Linked/SpeechSegment.cs" />
+    <Compile Include="../../Services/SpectrumAnalyzer.cs" Link="Linked/SpectrumAnalyzer.cs" />
+    <Compile Include="../../Models/DictationFocus.cs" Link="Linked/DictationFocus.cs" />
+    <Compile Include="../../Services/IDictationTarget.cs" Link="Linked/IDictationTarget.cs" />
+    <Compile Include="../../Services/DictationContext.cs" Link="Linked/DictationContext.cs" />
+    <Compile Include="../../Services/TranscriptJoiner.cs" Link="Linked/TranscriptJoiner.cs" />
+    <Compile Include="../../Services/AudioSamples.cs" Link="Linked/AudioSamples.cs" />
+    <Compile Include="../../Services/TranscriptText.cs" Link="Linked/TranscriptText.cs" />
+    <Compile Include="../../Services/SpeechModelFile.cs" Link="Linked/SpeechModelFile.cs" />
+    <Compile Include="../../Services/SpeechModelCatalog.cs" Link="Linked/SpeechModelCatalog.cs" />
+    <Compile Include="../../Services/ModelDownloadError.cs" Link="Linked/ModelDownloadError.cs" />
+    <Compile Include="../../Services/ModelDownloadException.cs" Link="Linked/ModelDownloadException.cs" />
+    <Compile Include="../../Services/ModelDownloader.cs" Link="Linked/ModelDownloader.cs" />
+    <Compile Include="../../Services/ModelDownloadManager.cs" Link="Linked/ModelDownloadManager.cs" />
+    <Compile Include="../../Services/PasteResult.cs" Link="Linked/PasteResult.cs" />
+    <Compile Include="../../Services/TextPaster.cs" Link="Linked/TextPaster.cs" />
+    <Compile Include="../../Services/SpeechState.cs" Link="Linked/SpeechState.cs" />
+    <Compile Include="../../Services/SpeechOutcome.cs" Link="Linked/SpeechOutcome.cs" />
+    <Compile Include="../../Services/SpeechStateChangedEventArgs.cs" Link="Linked/SpeechStateChangedEventArgs.cs" />
+    <Compile Include="../../Services/SpeechOrchestrator.cs" Link="Linked/SpeechOrchestrator.cs" />
   </ItemGroup>
 
   <ItemGroup>

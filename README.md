@@ -9,6 +9,20 @@
 
 **MovaCore** is a lightweight, blazing-fast, and "polite" keyboard layout converter for Windows. 
 Born from the need to seamlessly switch text between English and Ukrainian (and vice versa) without the mess of standard clipboard tools.
+It also types what you say: hold a key, speak, and the text appears where you are typing, recognized on your PC by Whisper.
+
+---
+
+## 🆕 New in 1.2: voice input
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/mouse-in-grass-dark.gif">
+    <img src="docs/media/mouse-in-grass-light.gif" width="420" alt="The dictation indicator: a field mouse dozes until the microphone is ready, sits in grass that grows with your voice, gnaws an ear of wheat while the speech is recognized and winks when the text is pasted">
+  </picture>
+</p>
+
+Hold **ScrollLock**, speak, and let go: MovaCore recognizes what you said with Whisper, right on your PC, and types it where your cursor is. While you speak, our field mouse sits in grass that grows with your voice; it gnaws an ear of wheat while the text is recognized and winks when it is pasted. Nothing you say leaves your computer. [How to set it up](#voice-input).
 
 ---
 
@@ -24,6 +38,7 @@ Born from the need to seamlessly switch text between English and Ukrainian (and 
 - **Press Again to Undo:** The converted text stays selected, so a second press converts it back, and the keyboard layout switches to the language you meant to type in.
 - **Your Layouts:** Conversion follows the layouts installed in Windows, including "Ukrainian (Enhanced)" with ґ.
 - **Stays Out of the Way:** Pause it from the tray, or list applications (e.g. `devenv`, `Code`) in which the hotkey is left to the application.
+- **Voice Input:** Hold a hotkey, speak, release: [Whisper](https://github.com/ggml-org/whisper.cpp) (Large v3 Turbo) recognizes the speech on your PC and pastes the text into the focused application. Choose the language and the microphone; a graphics card speeds it up (Vulkan).
 - **Minimalist UI:** Sits quietly in your system tray with a cute field mouse mascot. English and Ukrainian.
 
 ---
@@ -35,12 +50,27 @@ Born from the need to seamlessly switch text between English and Ukrainian (and 
 - Change the hotkey in **Settings** (right-click or double-click the tray icon): press the new key, optionally with Ctrl, Shift, Alt or Win.
 - In terminals, choose **Ctrl+Insert / Shift+Insert** in Settings: there Ctrl+C without a selection would interrupt the running program.
 
-Settings are stored in `%APPDATA%\MovaCore\settings.json`, and a diagnostic log in `%LOCALAPPDATA%\MovaCore\logs` (it never contains your text or keystrokes). MovaCore makes no network connections.
+### Voice input
+1. In **Settings → Voice**, turn on voice input and press **Save**. MovaCore downloads the speech model in the background (Whisper Large v3 Turbo q8_0, 874 MB, from [whisper.cpp's repository on Hugging Face](https://huggingface.co/ggerganov/whisper.cpp)); the tray icon's tooltip shows the progress. An interrupted download continues at the next start.
+2. **Hold ScrollLock** (default; change it in Settings), speak, and release it. The recognized text is pasted where the cursor is, and your clipboard is put back.
+3. While you speak, the tray icon shows a red dot, and a small indicator at the bottom of the screen shows a field mouse in grass that grows with your voice. If the grass is grey and the mouse dozes, the microphone is still starting: wait until the grass turns green. If it says no speech was heard, check the microphone chosen in Settings → Voice and its input level in the Windows sound settings.
+
+On the Voice tab you can also pick the full-precision model (1.6 GB) or a smaller one (574 MB) for slower computers, or your own whisper.cpp model file (`ggml-*.bin`; GGUF files are not supported), the speech language (automatic detection, Ukrainian, English and more) and the microphone. A downloaded model can be deleted there to free disk space.
+
+Dictating again right after a phrase, without typing or clicking in between, continues it: MovaCore adds the space, and starts with a small letter if the sentence was not finished. After you type or click, it cannot know what is before the cursor, so the phrase is pasted as Whisper wrote it.
+Recognition runs on the graphics card through Vulkan where available (x64), which is much faster, otherwise on the processor (x64 processors need AVX2, i.e. 2013 or newer).
+
+The microphone stays open for 30 seconds after each dictation, so that the next one starts instantly: Windows shows it as in use meanwhile, and a Bluetooth headset stays in its (lower-quality) headset mode.
+
+Audio is processed on your PC only: it is never saved or sent anywhere. The only network connection MovaCore makes is the model download from huggingface.co, after you turn voice input on.
+
+Settings are stored in `%APPDATA%\MovaCore\settings.json`, downloaded models in `%LOCALAPPDATA%\MovaCore\models`, and a diagnostic log in `%LOCALAPPDATA%\MovaCore\logs` (it never contains your text, keystrokes or what you say).
 
 ### Installation
 1. Download the latest `MovaCore-<version>-win-x64.zip` (or `win-arm64` for ARM devices) from the [Releases](https://github.com/cropsp/MovaCore/releases) page.
-2. Extract it and run `MovaCore.exe` — no installation or administrator rights required. Keep `uiohook.dll` next to the exe: it is the native keyboard hook. Only one instance runs at a time.
-3. Find the mouse icon in your system tray.
+2. Extract the whole archive into one folder and run `MovaCore.exe` — no installation or administrator rights required. Keep the other files next to the exe: `uiohook.dll` is the native keyboard hook, and the `runtimes` and `models` folders hold speech recognition. Only one instance runs at a time.
+3. If Windows says "Windows protected your PC", choose **More info** → **Run anyway**. SmartScreen warns about programs it has not seen often yet; the [Code signing policy](docs/CODE_SIGNING.md) says which releases are signed.
+4. Find the mouse icon in your system tray.
 
 > **Note:** Windows does not let a regular app read keystrokes from, or send input to, windows running as administrator.
 > To convert text in elevated apps, start MovaCore as administrator too. "Launch at Windows startup" always starts it without elevation.
@@ -51,6 +81,7 @@ Settings are stored in `%APPDATA%\MovaCore\settings.json`, and a diagnostic log 
 - **Runtime:** .NET 10 (Native AOT)
 - **Hooks:** [SharpHook](https://github.com/TolikPylypchuk/SharpHook)
 - **Core Logic:** Win32 P/Invoke for Clipboard management.
+- **Speech:** [whisper.cpp](https://github.com/ggml-org/whisper.cpp) through [Whisper.net](https://github.com/sandrohanea/whisper.net), voice activity detection with [Silero VAD](https://github.com/snakers4/silero-vad), microphone through [NAudio](https://github.com/naudio/NAudio) (WASAPI). The idea, and many details, come from [Handy](https://github.com/cjpais/Handy).
 - **UI:** WinForms (System Tray)
 
 ---

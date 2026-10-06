@@ -16,6 +16,9 @@ namespace MovaCore.Services
         private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(2);
         private const int KeyDelayMs = 25;
 
+        // Some applications miss a paste whose Ctrl is released sooner (seen by Handy on real machines)
+        private const int PasteHoldMs = 100;
+
         // Modifiers that may be physically held when we simulate a shortcut, with their Win32 virtual-key codes.
         // Ctrl is handled separately: our shortcuts press it first.
         private static readonly (KeyCode Key, int VirtualKey)[] HeldModifiers =
@@ -36,15 +39,19 @@ namespace MovaCore.Services
         private readonly object _captureLock = new();
         private TaskCompletionSource<Hotkey?>? _capture; // a pending CaptureHotkeyAsync
         private KeyCode _capturedKey = KeyCode.VcUndefined; // its release is suppressed too (hook thread only)
-        private bool _isTriggerKeyDown; // hook thread only
+        private readonly HotkeyStateTracker _tracker = new(); // hook thread only, except Reset before the hook runs
         private Task? _runTask; // Start and Stop are called on the UI thread only
 
         // Set on the UI thread, read on the hook thread: replaced as a whole, never mutated
         private volatile StrongBox<Hotkey> _trigger = new(new Hotkey(KeyCode.VcF10, HotkeyModifiers.None));
+        private volatile StrongBox<Hotkey?> _speech = new(null);
         private volatile HashSet<string> _excludedProcesses = new();
         private volatile CopyPasteKeys _copyPasteKeys = CopyPasteKeys.CtrlCV;
 
         public event EventHandler? HotkeyTriggered;
+        public event EventHandler? SpeechHotkeyPressed;
+        public event EventHandler? SpeechHotkeyReleased;
+        public event EventHandler? UserKeyPressed;
         public event EventHandler<Exception>? HookFailed;
 
         public HotkeyService()
@@ -71,6 +78,11 @@ namespace MovaCore.Services
             _trigger = new StrongBox<Hotkey>(trigger);
         }
 
+        public void SetSpeechHotkey(Hotkey? hotkey)
+        {
+            _speech = new StrongBox<Hotkey?>(hotkey);
+        }
+
         public void SetExcludedProcesses(IEnumerable<string> processNames)
         {
             _excludedProcesses = ProcessNames.NormalizeAll(processNames);
@@ -79,6 +91,9 @@ namespace MovaCore.Services
         public void Start()
         {
             if (IsRunning) return;
+
+            // A key held while the hook was stopped (Pause) would otherwise swallow the next press of that key
+            _tracker.Reset();
 
             // The task completes when the hook stops, and faults if it cannot start (e.g. uiohook.dll is missing)
             _runTask = _hook.RunAsync();
@@ -163,22 +178,26 @@ namespace MovaCore.Services
                 return;
             }
 
-            // Our own simulated shortcuts never count as the trigger
-            if (e.IsEventSimulated) return;
-
-            Hotkey trigger = _trigger.Value;
-            if (!HotkeyMatching.Matches(trigger, key, e.RawEvent.Mask)) return;
-            if (IsForegroundProcessExcluded()) return; // the application keeps its own shortcut
+            HotkeyAction action = _tracker.OnKeyPressed(
+                key, e.RawEvent.Mask, e.IsEventSimulated, _trigger.Value, _speech.Value, IsForegroundProcessExcluded);
+            if (!e.IsEventSimulated && action is HotkeyAction.PassThrough or HotkeyAction.TriggerPressed
+                && !HotkeyMatching.IsModifierKey(key))
+            {
+                UserKeyPressed?.Invoke(this, EventArgs.Empty);
+            }
+            if (action == HotkeyAction.PassThrough) return;
 
             e.SuppressEvent = true;
-            _isTriggerKeyDown = true;
+            if (action == HotkeyAction.Suppress) return;
 
             // The app saw Alt/Win go down but will not see the suppressed key: mask the release of Alt/Win
-            if ((trigger.Modifiers & (HotkeyModifiers.Alt | HotkeyModifiers.Win)) != 0)
+            if (_tracker.Held is { } held && (held.Modifiers & (HotkeyModifiers.Alt | HotkeyModifiers.Win)) != 0)
             {
                 keybd_event(MenuMaskVirtualKey, 0, 0, 0);
                 keybd_event(MenuMaskVirtualKey, 0, KEYEVENTF_KEYUP, 0);
             }
+
+            if (action == HotkeyAction.SpeechPressed) SpeechHotkeyPressed?.Invoke(this, EventArgs.Empty);
         }
 
         private void OnKeyReleased(object? sender, KeyboardHookEventArgs e)
@@ -193,11 +212,14 @@ namespace MovaCore.Services
             }
 
             // Only a release whose press was swallowed is ours; otherwise the application gets it
-            if (!_isTriggerKeyDown || key != _trigger.Value.Key) return;
+            HotkeyAction action = _tracker.OnKeyReleased(key);
+            if (action == HotkeyAction.PassThrough) return;
 
             e.SuppressEvent = true;
-            _isTriggerKeyDown = false;
-            HotkeyTriggered?.Invoke(this, EventArgs.Empty);
+            if (action == HotkeyAction.TriggerReleased)
+                HotkeyTriggered?.Invoke(this, EventArgs.Empty);
+            else
+                SpeechHotkeyReleased?.Invoke(this, EventArgs.Empty);
         }
 
         private bool IsForegroundProcessExcluded()
@@ -222,31 +244,32 @@ namespace MovaCore.Services
         public void SimulateCopy()
         {
             if (_copyPasteKeys == CopyPasteKeys.CtrlInsertShiftInsert)
-                SendShortcut(KeyCode.VcInsert, 1, KeyCode.VcLeftControl);
+                SendShortcut(KeyCode.VcInsert, 1, KeyDelayMs, KeyCode.VcLeftControl);
             else
-                SendShortcut(KeyCode.VcC, 1, KeyCode.VcLeftControl);
+                SendShortcut(KeyCode.VcC, 1, KeyDelayMs, KeyCode.VcLeftControl);
         }
 
         public void SimulatePaste()
         {
             if (_copyPasteKeys == CopyPasteKeys.CtrlInsertShiftInsert)
-                SendShortcut(KeyCode.VcInsert, 1, KeyCode.VcLeftShift);
+                SendShortcut(KeyCode.VcInsert, 1, PasteHoldMs, KeyCode.VcLeftShift);
             else
-                SendShortcut(KeyCode.VcV, 1, KeyCode.VcLeftControl);
+                SendShortcut(KeyCode.VcV, 1, PasteHoldMs, KeyCode.VcLeftControl);
         }
 
         public void SimulateSelectLeft(int caretSteps)
         {
-            if (caretSteps > 0) SendShortcut(KeyCode.VcLeft, caretSteps, KeyCode.VcLeftShift);
+            if (caretSteps > 0) SendShortcut(KeyCode.VcLeft, caretSteps, KeyDelayMs, KeyCode.VcLeftShift);
         }
 
         public void SimulateSelectWordLeft()
         {
-            SendShortcut(KeyCode.VcLeft, 1, KeyCode.VcLeftControl, KeyCode.VcLeftShift);
+            SendShortcut(KeyCode.VcLeft, 1, KeyDelayMs, KeyCode.VcLeftControl, KeyCode.VcLeftShift);
         }
 
-        // Presses `modifiers`, taps `key` `repeat` times and releases the modifiers, regardless of what the user holds
-        private void SendShortcut(KeyCode key, int repeat, params KeyCode[] modifiers)
+        // Presses `modifiers`, taps `key` `repeat` times and releases the modifiers `holdMs` later, regardless of what
+        // the user holds
+        private void SendShortcut(KeyCode key, int repeat, int holdMs, params KeyCode[] modifiers)
         {
             // Ctrl goes down first: it masks the release of a held Alt or Win below (no menu bar, no Start menu)
             _simulator.SimulateKeyPress(KeyCode.VcLeftControl);
@@ -268,7 +291,7 @@ namespace MovaCore.Services
                 _simulator.SimulateKeyPress(key);
                 _simulator.SimulateKeyRelease(key);
             }
-            Thread.Sleep(KeyDelayMs);
+            Thread.Sleep(holdMs);
 
             for (int i = modifiers.Length - 1; i >= 0; i--)
             {

@@ -41,6 +41,9 @@ jobs:
     name: Publish ${{ matrix.rid }}
     needs: build
     runs-on: windows-latest
+    permissions:
+      contents: read
+      actions: read # SignPath downloads the exe artifact with this job's token
     strategy:
       fail-fast: false
       matrix:
@@ -63,15 +66,75 @@ jobs:
           "### ${{ matrix.rid }}: $($warnings.Count) distinct AOT/trim warnings" >> $env:GITHUB_STEP_SUMMARY
           foreach ($w in $warnings) { "- ``$w``" >> $env:GITHUB_STEP_SUMMARY }
 
+      # The Whisper DLLs need the VC++ runtime next to them; then every native import must be satisfiable on a clean PC
+      - name: Add the VC++ runtime and check native dependencies
+        shell: pwsh
+        run: |
+          ./eng/copy-vc-runtime.ps1 -PublishDir out/${{ matrix.rid }} -Rid ${{ matrix.rid }}
+          ./eng/check-native-deps.ps1 -PublishDir out/${{ matrix.rid }}
+
+      # Silero voice activity model (under 1 MB), shipped in models\
+      - name: Cache the voice activity model
+        uses: actions/cache@v4
+        with:
+          path: vad-model
+          key: whisper-vad-${{ hashFiles('eng/get-vad-model.ps1') }}
+
+      - name: Add the voice activity model
+        shell: pwsh
+        run: ./eng/get-vad-model.ps1 -PublishDir out/${{ matrix.rid }} -CacheDir vad-model
+
       - name: Report output size
         shell: pwsh
         run: |
-          $files = Get-ChildItem out/${{ matrix.rid }} -File | Sort-Object Length -Descending
-          $files | Format-Table Name, @{ n = 'KB'; e = { [math]::Round($_.Length / 1KB) } } -AutoSize
-          "### ${{ matrix.rid }} publish output" >> $env:GITHUB_STEP_SUMMARY
+          $root = (Resolve-Path out/${{ matrix.rid }}).Path
+          $files = Get-ChildItem $root -File -Recurse | Where-Object Extension -ne '.pdb' | Sort-Object Length -Descending
+          $files | Format-Table @{ n = 'File'; e = { $_.FullName.Substring($root.Length + 1) } }, @{ n = 'KB'; e = { [math]::Round($_.Length / 1KB) } } -AutoSize
+          "### ${{ matrix.rid }} publish output: $([math]::Round(($files | Measure-Object Length -Sum).Sum / 1MB, 1)) MB" >> $env:GITHUB_STEP_SUMMARY
           "| File | Size |" >> $env:GITHUB_STEP_SUMMARY
           "|---|---|" >> $env:GITHUB_STEP_SUMMARY
-          foreach ($f in $files) { "| $($f.Name) | $([math]::Round($f.Length / 1MB, 2)) MB |" >> $env:GITHUB_STEP_SUMMARY }
+          foreach ($f in $files) { "| $($f.FullName.Substring($root.Length + 1)) | $([math]::Round($f.Length / 1MB, 2)) MB |" >> $env:GITHUB_STEP_SUMMARY }
+
+      # The smoke test transcribes with the tiny Whisper model (75 MB, cached between runs)
+      - name: Cache the smoke-test model
+        if: matrix.rid == 'win-x64'
+        uses: actions/cache@v4
+        with:
+          path: smoke-model/ggml-tiny.bin
+          key: whisper-ggml-tiny-bd577a11
+
+      - name: Get the smoke-test model
+        if: matrix.rid == 'win-x64'
+        shell: pwsh
+        run: |
+          $model = 'smoke-model/ggml-tiny.bin'
+          if (-not (Test-Path $model)) {
+            New-Item -ItemType Directory -Force smoke-model | Out-Null
+            Invoke-WebRequest https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin -OutFile $model
+          }
+          $sha1 = (Get-FileHash $model -Algorithm SHA1).Hash.ToLowerInvariant()
+          if ($sha1 -ne 'bd577a113a864445d4c299885e0cb97d4ba92b5f') { Remove-Item $model; throw "ggml-tiny.bin has SHA-1 $sha1" }
+
+      # "Hello world" from the Windows speech synthesizer (System.Speech needs Windows PowerShell), 16 kHz mono
+      - name: Record the smoke-test phrase
+        if: matrix.rid == 'win-x64'
+        shell: powershell
+        run: |
+          # Written under another name first: a failed Speak would leave an empty file behind
+          $wave = "$PWD\smoke-model\hello.wav"
+          try {
+            Add-Type -AssemblyName System.Speech
+            $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
+            $format = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(16000, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono)
+            $synth.SetOutputToWaveFile("$wave.tmp", $format)
+            $synth.Speak('Hello world. This is a test of the speech recognition.')
+            $synth.Dispose()
+            if ((Get-Item "$wave.tmp").Length -lt 16000) { throw 'The recording is empty' }
+            Move-Item "$wave.tmp" $wave -Force
+          } catch {
+            Remove-Item "$wave.tmp" -ErrorAction SilentlyContinue
+            Write-Warning "No speech synthesizer on this runner, the transcription is checked with a tone: $_"
+          }
 
       # Runs the published exe with --smoke-test (see SmokeTest.cs). An arm64 exe cannot run on the x64 runner.
       - name: Smoke test
@@ -80,9 +143,11 @@ jobs:
         run: |
           $log = "$env:LOCALAPPDATA/MovaCore/logs/movacore.log"
           Remove-Item $log -ErrorAction SilentlyContinue
-          $p = Start-Process out/win-x64/MovaCore.exe -ArgumentList '--smoke-test' -PassThru
+          $arguments = @('--smoke-test', '--smoke-test-model', "`"$((Resolve-Path smoke-model/ggml-tiny.bin).Path)`"")
+          if (Test-Path smoke-model/hello.wav) { $arguments += @('--smoke-test-audio', "`"$((Resolve-Path smoke-model/hello.wav).Path)`"") }
+          $p = Start-Process out/win-x64/MovaCore.exe -ArgumentList $arguments -PassThru
           $null = $p.Handle  # keeps ExitCode available after exit
-          if (-not $p.WaitForExit(60000)) { $p.Kill(); throw 'Smoke test timed out' }
+          if (-not $p.WaitForExit(90000)) { $p.Kill(); throw 'Smoke test timed out' }
           if (Test-Path $log) { Get-Content $log }
           if ($p.ExitCode -ne 0) { throw "Smoke test failed with exit code $($p.ExitCode)" }
 
@@ -101,12 +166,60 @@ jobs:
           if ($p.ExitCode -eq 0) { throw 'Expected a failure without uiohook.dll' }
           if (-not (Select-String -Path $log -Pattern 'uiohook.dll was not found' -Quiet)) { throw 'Missing-DLL error was not logged' }
 
+      # Release tags are signed once SignPath is set up (docs/CODE_SIGNING.md, docs/RELEASING.md). Only our own exe is
+      # sent: SignPath signs no third-party files. The request waits until the maintainer approves it in SignPath.
+      - name: Upload the exe for signing
+        id: unsigned-exe
+        if: startsWith(github.ref, 'refs/tags/v') && vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: actions/upload-artifact@v6
+        with:
+          name: MovaCore-${{ matrix.rid }}-unsigned-exe
+          path: out/${{ matrix.rid }}/MovaCore.exe
+          if-no-files-found: error
+
+      - name: Sign with SignPath
+        if: steps.unsigned-exe.outcome == 'success'
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: MovaCore
+          signing-policy-slug: release-signing
+          github-artifact-id: ${{ steps.unsigned-exe.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed
+
+      - name: Check the signature
+        if: steps.unsigned-exe.outcome == 'success'
+        shell: pwsh
+        run: |
+          $signature = Get-AuthenticodeSignature signed/MovaCore.exe
+          if ($signature.Status -ne 'Valid') { throw "MovaCore.exe is not validly signed: $($signature.Status) $($signature.StatusMessage)" }
+          if (-not $signature.TimeStamperCertificate) { throw 'The signature has no timestamp' }
+          "Signed by $($signature.SignerCertificate.Subject)"
+          "### ${{ matrix.rid }}: MovaCore.exe signed by $($signature.SignerCertificate.Subject)" >> $env:GITHUB_STEP_SUMMARY
+          Copy-Item signed/MovaCore.exe out/${{ matrix.rid }}/MovaCore.exe -Force
+
+      # upload-artifact only fails when nothing matches, so check every part that a release needs
+      - name: Check the release files
+        shell: pwsh
+        run: |
+          $arch = '${{ matrix.rid }}'.Substring(4)
+          $required = @('MovaCore.exe', 'uiohook.dll', "runtimes/win-$arch/whisper.dll", "runtimes/win-$arch/msvcp140.dll",
+            'models/ggml-silero-v6.2.0.bin')
+          if ($arch -eq 'x64') { $required += @('runtimes/vulkan/win-x64/ggml-vulkan-whisper.dll', 'runtimes/vulkan/win-x64/msvcp140.dll') }
+          $missing = $required | Where-Object { -not (Test-Path "out/${{ matrix.rid }}/$_") }
+          if ($missing) { throw "Missing from the publish output: $($missing -join ', ')" }
+
       - uses: actions/upload-artifact@v6
         with:
           name: MovaCore-${{ matrix.rid }}
           path: |
             out/${{ matrix.rid }}/MovaCore.exe
             out/${{ matrix.rid }}/uiohook.dll
+            out/${{ matrix.rid }}/runtimes/
+            out/${{ matrix.rid }}/models/
           if-no-files-found: error
 
   release:
@@ -121,6 +234,8 @@ jobs:
 
       # The tag must match <Version> in MovaCore.csproj, and CHANGELOG.md must have a section for it
       - name: Release notes from CHANGELOG.md
+        env:
+          SIGNED: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
         run: |
           version="${GITHUB_REF_NAME#v}"
           project_version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' MovaCore.csproj)
@@ -139,10 +254,21 @@ jobs:
           cat >> release-notes.md <<EOF
 
           ### Installation
-          Download \`MovaCore-$GITHUB_REF_NAME-win-x64.zip\` (or \`win-arm64\` for ARM devices), extract it and run
-          \`MovaCore.exe\`. Keep \`uiohook.dll\` next to it: it is the native keyboard hook. Checksums are in
+          Download \`MovaCore-$GITHUB_REF_NAME-win-x64.zip\` (or \`win-arm64\` for ARM devices), extract the whole
+          archive into one folder and run \`MovaCore.exe\`. Keep the other files next to it: \`uiohook.dll\` is the
+          native keyboard hook, and the \`runtimes\` and \`models\` folders hold speech recognition. Checksums are in
           \`SHA256SUMS.txt\`.
+
+          If Windows says "Windows protected your PC" (SmartScreen can do so for a new version), choose
+          **More info** → **Run anyway**.
+
           EOF
+          policy="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/docs/CODE_SIGNING.md"
+          if [ "$SIGNED" = "true" ]; then
+            echo "\`MovaCore.exe\` is signed with a SignPath Foundation certificate; see the [Code signing policy]($policy)." >> release-notes.md
+          else
+            echo "This release is not code-signed yet; see the [Code signing policy]($policy)." >> release-notes.md
+          fi
           cat release-notes.md
 
       - uses: actions/download-artifact@v7
@@ -153,8 +279,8 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME}"
           for rid in win-x64 win-arm64; do
-            cp LICENSE "artifacts/MovaCore-$rid/"
-            (cd "artifacts/MovaCore-$rid" && zip -9 "../../MovaCore-$tag-$rid.zip" *)
+            cp LICENSE THIRD-PARTY-NOTICES.txt "artifacts/MovaCore-$rid/"
+            (cd "artifacts/MovaCore-$rid" && zip -9 -r "../../MovaCore-$tag-$rid.zip" .)
           done
           sha256sum MovaCore-*.zip > SHA256SUMS.txt
           cat SHA256SUMS.txt

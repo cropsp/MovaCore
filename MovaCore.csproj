@@ -25,7 +25,7 @@
     <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
     <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
     
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Authors>cropsp</Authors>
     <Description>Fast and polite keyboard layout converter for Windows</Description>
     <Copyright>Copyright © 2026 cropsp</Copyright>
@@ -43,11 +43,33 @@
 
   <ItemGroup>
     <PackageReference Include="SharpHook" Version="7.1.3" />
+    <!-- Dictation. Whisper.net 1.9.2 is the first version with RuntimeOptions.ForcedRuntimeLibrary, which Native AOT
+         needs on x64 (its AVX check reads the compile-time baseline there). NAudio 3.1 is its first AOT-safe release. -->
+    <PackageReference Include="Whisper.net" Version="1.9.2-preview1" />
+    <PackageReference Include="Whisper.net.Runtime" Version="1.9.2-preview1" />
+    <PackageReference Include="Whisper.net.Runtime.Vulkan" Version="1.9.2-preview1" />
+    <PackageReference Include="NAudio.Wasapi" Version="[3.1.0]" />
   </ItemGroup>
   
   <ItemGroup>
     <!-- Loaded by AppResources.cs; generated from Resources\mouse_icon.png by eng/generate-icons.py -->
     <EmbeddedResource Include="Resources\movacore.ico" LogicalName="MovaCore.movacore.ico" />
+    <EmbeddedResource Include="Resources\movacore-recording.ico" LogicalName="MovaCore.movacore-recording.ico" />
+    <EmbeddedResource Include="Resources\movacore-transcribing.ico" LogicalName="MovaCore.movacore-transcribing.ico" />
     <EmbeddedResource Include="Resources\logo.png" LogicalName="MovaCore.logo.png" />
   </ItemGroup>
+
+  <!-- The Whisper.net runtime packages copy their native files for every architecture (and Vulkan's for Linux too),
+       whatever the RuntimeIdentifier is: keep only the published architecture's. -->
+  <Target Name="RemoveForeignWhisperRuntimes" AfterTargets="Publish" Condition="'$(RuntimeIdentifier)' != ''">
+    <ItemGroup>
+      <_ForeignWhisperRuntime Include="$(PublishDir)runtimes\win-x86" />
+      <_ForeignWhisperRuntime Include="$(PublishDir)runtimes\vulkan\linux-x64" />
+      <_ForeignWhisperRuntime Include="$(PublishDir)runtimes\win-arm64" Condition="'$(RuntimeIdentifier)' == 'win-x64'" />
+      <_ForeignWhisperRuntime Include="$(PublishDir)runtimes\win-x64" Condition="'$(RuntimeIdentifier)' == 'win-arm64'" />
+      <!-- Whisper.net has no Vulkan build for ARM -->
+      <_ForeignWhisperRuntime Include="$(PublishDir)runtimes\vulkan" Condition="'$(RuntimeIdentifier)' == 'win-arm64'" />
+    </ItemGroup>
+    <RemoveDir Directories="@(_ForeignWhisperRuntime)" />
+  </Target>
 </Project>
