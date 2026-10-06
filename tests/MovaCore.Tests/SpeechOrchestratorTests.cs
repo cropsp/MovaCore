@@ -108,6 +108,23 @@ namespace MovaCore.Tests
         }
 
         [Fact]
+        public void TextPasted_ComesBeforeTheFinalState()
+        {
+            int pasted = 0, idleBefore = 0;
+            _orchestrator.TextPasted += (_, _) =>
+            {
+                Interlocked.Increment(ref pasted);
+                if (_events.Any(change => change.State == SpeechState.Idle)) Interlocked.Increment(ref idleBefore);
+            };
+
+            Dictate();
+
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+            Assert.Equal(1, Volatile.Read(ref pasted));
+            Assert.Equal(0, Volatile.Read(ref idleBefore));
+        }
+
+        [Fact]
         public void FastRecognition_ReachesTheRecognizer()
         {
             _orchestrator.Configure(Settings(_modelPath) with { FastRecognition = true });

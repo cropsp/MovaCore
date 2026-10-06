@@ -34,6 +34,7 @@ namespace MovaCore.Services
         };
 
         private static readonly object RuntimeLock = new();
+        private static readonly HashSet<string> LoggedNativeMessages = new(StringComparer.Ordinal);
         private static RuntimeLibrary? _runtime;
         private static IDisposable? _nativeLog;
 
@@ -183,7 +184,10 @@ namespace MovaCore.Services
 
         private void EnsureModelLoaded(SpeechOptions options)
         {
-            bool onGpu = options.UseGpu && ChooseRuntime(options.UseGpu) == RuntimeLibrary.Vulkan;
+            // Always first: with the GPU off too, Whisper.net must get the forced runtime (and the native log) before it
+            // loads anything
+            RuntimeLibrary runtime = ChooseRuntime(options.UseGpu);
+            bool onGpu = options.UseGpu && runtime == RuntimeLibrary.Vulkan;
             if (_factory != null && _loadedModel == options.ModelPath && _loadedOnGpu == onGpu) return;
 
             // Never two models in memory at once: they take hundreds of megabytes each
@@ -242,7 +246,13 @@ namespace MovaCore.Services
                 .WithNoContext()
                 .WithThreads(Math.Clamp(Environment.ProcessorCount, 1, 8));
             if (audioContext < WhisperAudioContext.Full)
-                builder.WithAudioContextSize(audioContext);
+            {
+                // A short context makes Whisper prone to repeating the phrase once it is done: one segment, and a
+                // ceiling of ~15 tokens a second, far above speech, stop that loop (TranscriptText drops what is left)
+                builder.WithAudioContextSize(audioContext)
+                    .WithSingleSegment()
+                    .WithMaxTokensPerSegment(audioContext / 4);
+            }
             _processor = builder.Build();
             _processorContext = audioContext;
             _language = options.Language;
@@ -377,8 +387,15 @@ namespace MovaCore.Services
                     || message.Contains("backend", StringComparison.OrdinalIgnoreCase)
                     || message.Contains("buffer", StringComparison.OrdinalIgnoreCase)
                     || message.Contains("flash", StringComparison.OrdinalIgnoreCase));
-            if (problem || device)
-                AppLog.Info("whisper.cpp: " + message.Trim());
+            if (!problem && !device) return;
+
+            // whisper.cpp describes the backend and its buffers again for every transcription: once is enough
+            string line = message.Trim();
+            lock (LoggedNativeMessages)
+            {
+                if (!LoggedNativeMessages.Add(line)) return;
+            }
+            AppLog.Info("whisper.cpp: " + line);
         }
 
         public void Dispose()

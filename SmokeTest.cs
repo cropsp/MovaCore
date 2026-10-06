@@ -237,9 +237,6 @@ namespace MovaCore
             overlay.ShowTranscribing();
             await Task.Delay(450); // the mouse gnaws its wheat after a delay
             overlay.RenderFrame().Dispose();
-            overlay.ShowPasted();
-            await Task.Delay(150);
-            overlay.RenderFrame().Dispose();
             foreach (MouseScene.Pose pose in new[] { MouseScene.Pose.Puzzled, MouseScene.Pose.Straining, MouseScene.Pose.Calm })
             {
                 overlay.ShowMessage(Strings.OverlayNoSignal, pose);
@@ -411,6 +408,10 @@ namespace MovaCore
                 AppLog.Info($"Smoke test: transcribed with audio context {audioContext} in {watch.Elapsed.TotalSeconds:0.00} s: \"{text}\"");
                 if (audioPath != null && !text.Contains("hello", StringComparison.OrdinalIgnoreCase))
                     AppLog.Error($"Smoke test: the recording of \"hello world\" was not recognized with audio context {audioContext}");
+                // A short audio context makes Whisper prone to saying it all again
+                int first = text.IndexOf("hello", StringComparison.OrdinalIgnoreCase);
+                if (first >= 0 && text.IndexOf("hello", first + 1, StringComparison.OrdinalIgnoreCase) >= 0)
+                    AppLog.Error($"Smoke test: the phrase came out repeated with audio context {audioContext}");
             }
         }
 

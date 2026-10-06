@@ -14,10 +14,14 @@ namespace MovaCore.Services
             "uh", "uhm", "umm", "uhh", "uhhh", "ehh", "ehm", "ahm", "hmm", "hm", "mmm", "хм", "хмм", "ммм",
         };
 
+        // A repeated phrase this long is Whisper looping, not the speaker: "так, так" and "ну давай ну давай" stay
+        private const int MinRepeatedPhraseWords = 3;
+
         /// <summary>
         /// Joins the segments with single spaces, dropping the ones that describe sounds instead of speech:
-        /// "[BLANK_AUDIO]", "(music)", "[Музика]", "*laughs*", "♪". Hesitations ("хм", "uhm") go too, and a word
-        /// repeated three or more times in a row (how Whisper loops) is kept once.
+        /// "[BLANK_AUDIO]", "(music)", "[Музика]", "*laughs*", "♪". Hesitations ("хм", "uhm") go too. A word repeated
+        /// three or more times in a row, or a phrase of three or more words repeated right after itself, is kept once:
+        /// that is how Whisper loops, the second especially when it encodes a short audio context.
         /// </summary>
         public static string Clean(IEnumerable<string> segments)
         {
@@ -30,7 +34,7 @@ namespace MovaCore.Services
                 if (text.Length > 0) text.Append(' ');
                 text.Append(trimmed);
             }
-            return CollapseRepeats(RemoveFillers(CollapseWhitespace(text.ToString())));
+            return CollapseRepeatedPhrases(CollapseRepeats(RemoveFillers(CollapseWhitespace(text.ToString()))));
         }
 
         private static string RemoveFillers(string text)
@@ -89,6 +93,43 @@ namespace MovaCore.Services
                 }
             }
             return string.Join(' ', kept);
+        }
+
+        // "Привіт, як справи? Привіт, як справи?" → "Привіт, як справи?": words compared without case and the punctuation
+        // after them, the longest repeat first; a kept phrase without final punctuation takes the dropped copy's
+        private static string CollapseRepeatedPhrases(string text)
+        {
+            var tokens = new List<string>(text.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+            bool changed = true;
+            while (changed)
+            {
+                changed = false;
+                for (int length = tokens.Count / 2; length >= MinRepeatedPhraseWords && !changed; length--)
+                {
+                    for (int start = 0; start + 2 * length <= tokens.Count; start++)
+                    {
+                        if (!SamePhrase(tokens, start, start + length, length)) continue;
+
+                        (string lastWord, string lastPunctuation) = Split(tokens[start + length - 1]);
+                        string droppedPunctuation = Split(tokens[start + 2 * length - 1]).Punctuation;
+                        if (lastPunctuation.Length == 0) tokens[start + length - 1] = lastWord + droppedPunctuation;
+                        tokens.RemoveRange(start + length, length);
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+            return string.Join(' ', tokens);
+        }
+
+        private static bool SamePhrase(List<string> tokens, int first, int second, int length)
+        {
+            for (int i = 0; i < length; i++)
+            {
+                if (!string.Equals(Split(tokens[first + i]).Word, Split(tokens[second + i]).Word, StringComparison.CurrentCultureIgnoreCase))
+                    return false;
+            }
+            return true;
         }
 
         // A token's word and the punctuation after it

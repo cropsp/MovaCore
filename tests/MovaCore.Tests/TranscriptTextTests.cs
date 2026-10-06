@@ -70,6 +70,28 @@ namespace MovaCore.Tests
             Assert.Equal(expected, TranscriptText.Clean(new[] { recognized }));
         }
 
+        [Theory]
+        [InlineData("Привіт, як справи? Привіт, як справи? Привіт, як справи?", "Привіт, як справи?")]
+        [InlineData("Я йду додому. Я йду додому.", "Я йду додому.")]
+        [InlineData("я йду додому я йду додому.", "я йду додому.")]
+        [InlineData("Купи хліб. Купи хліб і молоко. Купи хліб і молоко.", "Купи хліб. Купи хліб і молоко.")]
+        [InlineData("Добре, зроблю це завтра зранку зроблю це завтра зранку", "Добре, зроблю це завтра зранку")]
+        public void PhrasesRepeatedRightAfterThemselves_AreKeptOnce(string recognized, string expected) =>
+            Assert.Equal(expected, TranscriptText.Clean(new[] { recognized }));
+
+        [Fact]
+        public void RepeatedSegments_AreKeptOnce() =>
+            Assert.Equal("Купи хліб і молоко.", TranscriptText.Clean(new[] { "Купи хліб і молоко.", " Купи хліб і молоко." }));
+
+        [Theory]
+        [InlineData("Так, так.")]
+        [InlineData("Це дуже дуже добре.")]
+        [InlineData("ну давай ну давай, починаємо")]
+        [InlineData("Я йду додому. Я йду в магазин.")]
+        [InlineData("Він сказав: я прийду, я прийду завтра.")]
+        public void OrdinaryRepetition_IsKept(string recognized) =>
+            Assert.Equal(recognized, TranscriptText.Clean(new[] { recognized }));
+
         [Fact]
         public void OnlyHesitations_GiveEmptyText()
         {

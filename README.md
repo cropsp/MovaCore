@@ -34,13 +34,14 @@
 the other layout and switches your keyboard to that language. The text stays selected, so pressing **F10** again
 undoes it. It works both ways (`Руддщ` → `Hello`) and in almost any app.
 
-**Type with your voice.** Hold **ScrollLock**, speak, and let go. Whisper recognizes your speech on your own computer,
-and the text appears where the cursor is. Nothing you say leaves your PC. [Set it up](#voice-input).
+**Type with your voice.** Hold the dictation key (**ScrollLock** by default; pick any key you have in Settings →
+Voice), speak, and let go. Whisper recognizes your speech on your own computer, and the text appears where the cursor
+is. Nothing you say leaves your PC. [Set it up](#voice-input).
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/media/mouse-in-grass-dark.gif">
-    <img src="docs/media/mouse-in-grass-light.gif" width="420" alt="The dictation indicator: a field mouse dozes until the microphone is ready, sits in grass that grows with your voice, gnaws an ear of wheat while the speech is recognized and winks when the text is pasted">
+    <img src="docs/media/mouse-in-grass-light.gif" width="420" alt="The dictation indicator: a field mouse dozes until the microphone is ready, sits in grass that grows with your voice, gnaws an ear of wheat while the speech is recognized and fades out as the text is pasted">
   </picture>
 </p>
 
@@ -67,7 +68,8 @@ start MovaCore with Windows, turn on **Launch at Windows startup** in Settings �
 
 1. In Settings → Voice, turn on **Voice input** and press **Save**. MovaCore downloads the speech model (874 MB) in the
    background, and the tray icon's tooltip shows the progress.
-2. Click where the text should go, **hold ScrollLock**, speak, and let go.
+2. Click where the text should go, **hold the dictation key** (ScrollLock by default), speak, and let go. No
+   ScrollLock on your keyboard? Pick another key under **Dictation hotkey (hold)** on the Voice tab.
 3. The text appears at the cursor, and whatever you had copied is put back on the clipboard.
 
 While you hold the key, the tray icon shows a red dot, and a small indicator at the bottom of the screen shows the

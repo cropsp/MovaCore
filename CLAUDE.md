@@ -128,10 +128,14 @@ Dictation (hold-to-talk) reuses the hook, the clipboard service and the paste:
   one warm-up run (shader compilation), and every model loads with flash attention. Whisper encodes a 30-s window
   (1500 positions) however short the phrase, which takes many seconds on a weak computer; with
   `SpeechFastRecognition` (experimental, on by default) a phrase is encoded with the audio context
-  `WhisperAudioContext.For` its length (steps of 5.12 s after a 1 s margin, whisper.cpp's `audio_ctx`). A processor
-  is built per audio context (Whisper.net fixes it at `Build`), one at a time since each holds its own buffers.
-  `OnNativeLog` keeps whisper.cpp's warnings and errors plus ggml's device lines (Vulkan device, buffers). It is also
-  the `ISpeechDetector`: whisper.cpp's Silero VAD with
+  `WhisperAudioContext.For` its length (steps of 5.12 s after a 1 s margin, whisper.cpp's `audio_ctx`). A short
+  context makes Whisper repeat the phrase once it is done, so such processors get a single segment and a token ceiling
+  (`audioContext / 4`), and `TranscriptText` drops a phrase of three or more words repeated right after itself. A
+  processor is built per audio context (Whisper.net fixes it at `Build`), one at a time since each holds its own
+  buffers; Whisper.net still creates and frees a whisper state on every call. `ChooseRuntime` runs before any model
+  loads, with the GPU option off too, or Whisper.net would pick a runtime itself. `OnNativeLog` keeps whisper.cpp's
+  warnings and errors plus ggml's device lines (Vulkan device and its type, buffers), each distinct line once. It is
+  also the `ISpeechDetector`: whisper.cpp's Silero VAD with
   `models\ggml-silero-v6.2.0.bin` next to the exe, which `eng/get-vad-model.ps1` puts into the publish output (CI and
   `publish.ps1`; a plain `dotnet build` has none, so the energy threshold is used).
 - **`Services/ModelDownloader.cs`** is the only network code: it downloads a `SpeechModelCatalog` model from
@@ -147,8 +151,9 @@ Dictation (hold-to-talk) reuses the hook, the clipboard service and the paste:
   would call `SetLayeredWindowAttributes`, after which `UpdateLayeredWindow` fails), and draw text with GDI+, not
   `TextRenderer` (GDI text has no alpha). It draws `UI/MouseScene.cs`: the
   logo's field mouse in grass whose tufts are the equalizer (`SpectrumAnalyzer`, Handy's algorithm), grey with the
-  mouse dozing until the microphone delivers, the mouse gnawing wheat if transcribing takes over 0.3 s, a wink when
-  pasted, or the mouse's head beside a short message; it fades in and out. The scene was designed as a browser mockup
+  mouse dozing until the microphone delivers, the mouse gnawing wheat if transcribing takes over 0.3 s, or the mouse's
+  head beside a short message; it fades in, and fades out the moment the text is pasted (`TextPasted`, raised by
+  `TextPaster`'s `onPasted` right after the paste keys, before the clipboard is restored). The scene was designed as a browser mockup
   first; keep its proportions (152 x 44 logical pixels) when changing it. Errors the user can fix
   (`SpeechException`: no model, no microphone, unsupported CPU…) are logged as Info, not Error; never log what was
   said or the audio.

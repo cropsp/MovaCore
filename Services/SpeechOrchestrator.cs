@@ -58,6 +58,12 @@ namespace MovaCore.Services
         /// <summary>Raised on a worker thread.</summary>
         public event EventHandler<SpeechStateChangedEventArgs>? StateChanged;
 
+        /// <summary>
+        /// The text has just been pasted (the paste keys went out), on a worker thread: the final <see cref="StateChanged"/>
+        /// follows once the clipboard is back, a moment later.
+        /// </summary>
+        public event EventHandler? TextPasted;
+
         public SpeechState State => _state;
 
         /// <summary>
@@ -371,7 +377,8 @@ namespace MovaCore.Services
                         cancellationToken.ThrowIfCancellationRequested();
                         // A phrase that continues the previous dictation gets a space, and no capital mid-sentence
                         text = TranscriptJoiner.Join(_context?.TextBefore(), text);
-                        PasteResult result = await _paster.PasteAsync(text, restoreClipboard);
+                        PasteResult result = await _paster.PasteAsync(
+                            text, restoreClipboard, () => TextPasted?.Invoke(this, EventArgs.Empty));
                         if (result == PasteResult.Pasted)
                             _context?.Remember(text);
                         else

@@ -77,6 +77,7 @@ namespace MovaCore
             _orchestrator.ConversionFailed += OnConversionFailed;
             _hotkeyService.HookFailed += OnHookFailed;
             _speech.StateChanged += OnSpeechStateChanged;
+            _speech.TextPasted += OnTextPasted;
             _downloads.StateChanged += OnDownloadStateChanged;
             _downloads.ModelDeleted += OnModelDeleted;
 
@@ -204,6 +205,12 @@ namespace MovaCore
             _uiContext.Post(_ => ShowSpeechState(e), null);
         }
 
+        // The indicator goes the moment the text appears, not after the clipboard is restored
+        private void OnTextPasted(object? sender, EventArgs e)
+        {
+            _uiContext.Post(_ => _overlay.HideOverlay(), null);
+        }
+
         private void ShowSpeechState(SpeechStateChangedEventArgs e)
         {
             _speechState = e.State;
@@ -234,10 +241,7 @@ namespace MovaCore
             };
             if (message == null)
             {
-                if (overlay && e.Outcome == SpeechOutcome.Pasted)
-                    _overlay.ShowPasted();
-                else
-                    _overlay.HideOverlay();
+                _overlay.HideOverlay();
             }
             else if (overlay)
             {
@@ -451,6 +455,7 @@ namespace MovaCore
                 _hotkeyService.SpeechHotkeyPressed -= OnSpeechHotkeyPressed;
                 _hotkeyService.SpeechHotkeyReleased -= OnSpeechHotkeyReleased;
                 _speech.StateChanged -= OnSpeechStateChanged;
+                _speech.TextPasted -= OnTextPasted;
                 _downloads.StateChanged -= OnDownloadStateChanged;
                 _downloads.ModelDeleted -= OnModelDeleted;
                 _notifyIcon?.Dispose();

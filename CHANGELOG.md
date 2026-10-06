@@ -9,11 +9,18 @@ All notable changes to MovaCore are documented here. The format follows
 - Short phrases are recognized several times faster, which matters most on computers without a strong graphics card:
   Whisper now processes only as much audio as the phrase takes instead of always 30 seconds. This is experimental
   and can be turned off on the Voice tab ("Faster recognition of short phrases"), in case it recognizes worse.
-  Speech recognition also uses flash attention, which is faster and needs less graphics memory.
+  Speech recognition also uses flash attention, which is faster and needs less graphics memory. Whisper tends to
+  repeat a phrase when it processes so little audio, so it now produces a single segment of limited length, and a
+  phrase repeated right after itself is pasted once.
+- The dictation indicator fades out the moment the text is pasted, instead of winking for most of a second after it.
 
 ### Added
 - The log names the graphics card that speech recognition runs on and how much memory it uses, to help find out why
   recognition is slow on a given computer.
+
+### Fixed
+- With "Use the graphics card" turned off when MovaCore started, the speech recognition runtime was left for
+  Whisper.net to pick, which could fail on computers without Vulkan.
 
 ## [1.2.0] - 2026-10-06
 

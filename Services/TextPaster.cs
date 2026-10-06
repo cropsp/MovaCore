@@ -37,7 +37,11 @@ namespace MovaCore.Services
         internal TimeSpan UnobservedPasteDelay { get; init; } = TimeSpan.FromMilliseconds(600);
 
         /// <summary>Blocks on simulated key presses: call it on a worker thread, never the UI or hook thread.</summary>
-        public async Task<PasteResult> PasteAsync(string text, bool restoreClipboard)
+        /// <summary>
+        /// Pastes the text; <paramref name="onPasted"/> runs right after the paste keys went out, before this waits
+        /// for the application to read the text and puts the user's clipboard back.
+        /// </summary>
+        public async Task<PasteResult> PasteAsync(string text, bool restoreClipboard, Action? onPasted = null)
         {
             if (!await _clipboardGate.WaitAsync(GateTimeout)) return PasteResult.Busy;
 
@@ -55,6 +59,7 @@ namespace MovaCore.Services
                 bool readEarly = await _clipboardService.WaitForTextReadAsync(setStarted, TimeSpan.Zero);
                 long pasteStarted = Stopwatch.GetTimestamp();
                 _hotkeyService.SimulatePaste();
+                onPasted?.Invoke();
 
                 if (readEarly)
                 {
