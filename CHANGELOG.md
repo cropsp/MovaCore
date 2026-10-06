@@ -16,6 +16,8 @@ All notable changes to MovaCore are documented here. The format follows
 - Speech recognition uses one thread per processor core (up to 8) instead of one per logical processor: on a
   processor with Hyper-Threading, two threads on the same core only compete for it. The log names the number of
   threads.
+- On a graphics card, a short phrase is recognized about twice as fast: the working memory of speech recognition is
+  now set up once, when the model loads, instead of for every phrase, which took about half of the time.
 
 ### Added
 - The log names the graphics card that speech recognition runs on and how much memory it uses, to help find out why

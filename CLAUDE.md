@@ -131,10 +131,15 @@ Dictation (hold-to-talk) reuses the hook, the clipboard service and the paste:
   (1500 positions) however short the phrase, which takes many seconds on a weak computer; with
   `SpeechFastRecognition` (experimental, on by default) a phrase is encoded with the audio context
   `WhisperAudioContext.For` its length (steps of 5.12 s after a 1 s margin, whisper.cpp's `audio_ctx`). A short
-  context makes Whisper repeat the phrase once it is done, so such processors get a single segment and a token ceiling
-  (`audioContext / 4`), and `TranscriptText` drops a phrase of three or more words repeated right after itself. A
-  processor is built per audio context (Whisper.net fixes it at `Build`), one at a time since each holds its own
-  buffers; Whisper.net still creates and frees a whisper state on every call. `ChooseRuntime` runs before any model
+  context makes Whisper repeat the phrase once it is done, so such calls get a single segment and a token ceiling
+  (`audioContext / 4`), and `TranscriptText` drops a phrase of three or more words repeated right after itself.
+  Whisper.net loads the model, but transcription bypasses its `WhisperProcessor`, which creates and frees a whisper
+  state (the compute buffers: half the time of a short phrase on a GPU) on every call: `WhisperNative` calls whisper.cpp
+  through function pointers from the `whisper.dll` that `ChooseRuntime` loaded (the module Whisper.net uses), with one
+  state per loaded model, since `whisper_full_with_state` takes the audio context per call. The model's context comes
+  from Whisper.net's private `WhisperFactory.contextLazy` (`UnsafeAccessor`), and `WhisperFullParams` mirrors
+  whisper.cpp's struct, passed by value: when upgrading Whisper.net, check both against its source and bundled
+  `whisper.h` (`WhisperFullParamsTests` holds the size and offsets). `ChooseRuntime` runs before any model
   loads, with the GPU option off too, or Whisper.net would pick a runtime itself. `OnNativeLog` keeps whisper.cpp's
   warnings and errors plus ggml's device lines (Vulkan device and its type, buffers), each distinct line once. Whisper
   computes with one thread per physical core (`WhisperThreads`: at most 8, 4 for the VAD; cores counted with

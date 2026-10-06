@@ -418,6 +418,9 @@ namespace MovaCore
                 if (first >= 0 && text.IndexOf("hello", first + 1, StringComparison.OrdinalIgnoreCase) >= 0)
                     AppLog.Error($"Smoke test: the phrase came out repeated with audio context {audioContext}");
             }
+            // Both audio contexts share the whisper state created with the model
+            if (recognizer.StatesCreated != 1)
+                AppLog.Error($"Smoke test: {recognizer.StatesCreated} whisper states created for one model");
         }
 
         // The Silero model ships with the app: speech must be found in the recording and none in silence

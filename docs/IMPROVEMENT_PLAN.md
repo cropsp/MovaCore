@@ -438,6 +438,11 @@ AOT x64 і arm64, smoke-тест). Smoke-тест на Windows знайшов т
 - Етап 2, п. 3 (`claude/sleepy-rubin-z4xy4k`): потоки whisper.cpp = фізичні ядра (`WhisperThreads`, ядра — з
   `GetLogicalProcessorInformationEx`, стеля 8, для VAD 4), лог `Speech recognition runtime: Cpu, 4 threads (4 cores,
   8 logical processors)`; smoke-тест перевіряє підрахунок ядер.
+- Етап 2, п. 1: один стан whisper на завантажену модель. Транскрипція йде повз `WhisperProcessor` через
+  `WhisperNative` (вказівники на функції `whisper.dll`, `whisper_full_with_state`), контекст моделі — з приватного
+  `WhisperFactory.contextLazy` (`UnsafeAccessor`), `WhisperFullParams` — копія структури whisper.cpp 371b5a7 (розмір 304,
+  зміщення звірені компілятором C і закріплені в `WhisperFullParamsTests`). Лог `Speech state ready in N ms` один раз
+  на завантаження; smoke-тест перевіряє, що обидва вікна пройшли через один стан. Чекає перевірки власником на RTX 4060.
 - Реліз — після всіх етапів (рішення власника від 2026-10-06), не 1.2.1 одразу: тоді PR у `main`, версія,
   CHANGELOG `[Unreleased]` → новий номер, тег ставить власник (сесіям заборонено пушити теги). Власник і друг
   перевіряють проміжні збірки з CI.
@@ -448,6 +453,12 @@ AOT x64 і arm64, smoke-тест). Smoke-тест на Windows знайшов т
   (iGPU), ~26 с (процесор). Адаптивне вікно: 2 с → 2,7–3,3 с (iGPU), 5,4 с → 8 с (процесор). Прогрів 39,6 → 9,2 с.
 - Власник: RTX 4060, ~0,6–1,3 с на фразу. З них 0,4–0,9 с — `whisper_init_state`: Whisper.net створює й звільняє стан
   whisper (бекенд Vulkan і буфери) на кожен виклик (`WhisperProcessor.GetWhisperState`).
+- Власник, лог збірки `292b9c1` (процесор 14 ядер / 28 логічних, RTX 4060): помилок немає. Відеокарта: v1.2.0 (вікно
+  30 с) ~1,0–1,1 с на фразу, адаптивне вікно 0,6–0,9 с; з них `whisper_init_state` 0,27–0,44 с (12:49:07: 0,44 с стан +
+  0,40 с розпізнавання). Процесор: 1,87–1,95 с на коротку фразу (вікно 256), без повторів; до стелі токенів 2,7 с
+  мовлення займали 8,58 с (петля повтору). Потоків 8 і до, і після п. 3 (`min(14, 28)` упирається в стелю 8), тож
+  ефект п. 3 видно лише на ноутбуці друга (8 → 4 потоки). На процесорі стан створюється за ~25 мс — п. 1 там не
+  допоможе. Перемикання вікон 256 ↔ 512 нічого не коштувало («ready in 0 ms»).
 
 **Рішення власника.**
 - Адаптивне вікно лишається типово ввімкненим, поки тести не покажуть погіршення.
@@ -460,11 +471,9 @@ AOT x64 і arm64, smoke-тест). Smoke-тест на Windows знайшов т
   reporting — у Settings → Advanced Security.
 
 **Етап 2 — продуктивність і відеокарта.**
-1. Повторне використання стану whisper: Whisper.net цього не вміє, тож прямі `LibraryImport`-виклики `whisper.dll`
-   (`whisper_init_state` один раз, `whisper_full_with_state`, `whisper_full_n_segments_from_state`,
-   `whisper_full_get_segment_text_from_state`, `whisper_free_state`) з контекстом від Whisper.net. Структура
-   `whisper_full_params` має точно збігатися з whisper.cpp у Whisper.net 1.9.2-preview1 (взяти з його
-   `WhisperFullParams`). Виграш 0,4–0,9 с на фразу на дискретних відеокартах; перевіряти smoke-тестом.
+1. ~~Повторне використання стану whisper~~ — зроблено (див. «На гілці»): прямі виклики `whisper.dll` через вказівники
+   на функції з дескриптора, який завантажує `ChooseRuntime` (не `LibraryImport`: Whisper.net вантажить DLL за повним
+   шляхом з `runtimes\`), контекст від Whisper.net. Очікуваний виграш на RTX 4060: 0,6–0,9 с → ~0,3–0,45 с на фразу.
 2. Вибір відеокарти: список через `vulkan-1.dll` (`vkCreateInstance`, `vkEnumeratePhysicalDevices`,
    `vkGetPhysicalDeviceProperties`: назва, тип); замість галочки «Використовувати відеокарту» — список «Автоматично /
    <відеокарти> / Лише процесор»; вибір — через `GGML_VK_VISIBLE_DEVICES` до завантаження рушія, діє після
