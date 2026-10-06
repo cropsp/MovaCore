@@ -361,10 +361,14 @@ namespace MovaCore.Services
                     IReadOnlyList<string> segments = await _recognizer.TranscribeAsync(audio, options, cancellationToken);
                     string text = TranscriptText.Clean(segments);
 
-                    // Never log the text itself: it is what the user said
+                    // Never log the text itself: it is what the user said. The parts and the characters before cleaning
+                    // tell whether Whisper repeated itself.
                     int audioContext = options.FastRecognition ? WhisperAudioContext.For(audio.Length) : WhisperAudioContext.Full;
+                    int recognized = 0;
+                    foreach (string segment in segments) recognized += segment.Trim().Length;
                     AppLog.Info($"Dictation: {AudioSamples.Duration(speech.Length).TotalSeconds:0.0} s of speech transcribed in " +
-                        $"{Stopwatch.GetElapsedTime(started).TotalSeconds:0.00} s (audio context {audioContext}), {text.Length} characters");
+                        $"{Stopwatch.GetElapsedTime(started).TotalSeconds:0.00} s (audio context {audioContext}), " +
+                        $"{segments.Count} part(s), {text.Length} characters of {recognized}");
                     Array.Clear(speech);
                     Array.Clear(audio);
 

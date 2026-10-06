@@ -410,7 +410,8 @@ namespace MovaCore
                 // Synthetic audio, so the text may be logged
                 string text = TranscriptText.Clean(segments);
                 int audioContext = fast ? WhisperAudioContext.For(padded.Length) : WhisperAudioContext.Full;
-                AppLog.Info($"Smoke test: transcribed with audio context {audioContext} in {watch.Elapsed.TotalSeconds:0.00} s: \"{text}\"");
+                AppLog.Info($"Smoke test: transcribed with audio context {audioContext} in {watch.Elapsed.TotalSeconds:0.00} s: \"{text}\" " +
+                    $"(parts: \"{string.Join("\" | \"", segments)}\")");
                 if (audioPath != null && !text.Contains("hello", StringComparison.OrdinalIgnoreCase))
                     AppLog.Error($"Smoke test: the recording of \"hello world\" was not recognized with audio context {audioContext}");
                 // A short audio context makes Whisper prone to saying it all again

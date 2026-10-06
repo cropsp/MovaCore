@@ -18,23 +18,75 @@ namespace MovaCore.Services
         private const int MinRepeatedPhraseWords = 3;
 
         /// <summary>
-        /// Joins the segments with single spaces, dropping the ones that describe sounds instead of speech:
-        /// "[BLANK_AUDIO]", "(music)", "[Музика]", "*laughs*", "♪". Hesitations ("хм", "uhm") go too. A word repeated
-        /// three or more times in a row, or a phrase of three or more words repeated right after itself, is kept once:
-        /// that is how Whisper loops, the second especially when it encodes a short audio context.
+        /// Joins the segments (the parts Whisper marked with timestamps) with single spaces, dropping the ones that
+        /// describe sounds instead of speech: "[BLANK_AUDIO]", "(music)", "[Музика]", "*laughs*", "♪", and the ones that
+        /// start over what came before (<see cref="DropRepeatedParts"/>). Hesitations ("хм", "uhm") go too. A word
+        /// repeated three or more times in a row, or a phrase of three or more words repeated right after itself, is
+        /// kept once: that is how Whisper loops, the second especially when it encodes a short audio context.
         /// </summary>
         public static string Clean(IEnumerable<string> segments)
         {
-            var text = new StringBuilder();
+            var parts = new List<string>();
             foreach (string segment in segments)
             {
                 string trimmed = segment.Trim();
                 if (trimmed.Length == 0 || IsAnnotation(trimmed)) continue;
-
-                if (text.Length > 0) text.Append(' ');
-                text.Append(trimmed);
+                parts.Add(trimmed);
             }
-            return CollapseRepeatedPhrases(CollapseRepeats(RemoveFillers(CollapseWhitespace(text.ToString()))));
+            string text = string.Join(' ', DropRepeatedParts(parts));
+            return CollapseRepeatedPhrases(CollapseRepeats(RemoveFillers(CollapseWhitespace(text))));
+        }
+
+        /// <summary>
+        /// Whisper repeats itself when it thinks the audio goes on after the speech: it marks the end of the phrase, opens
+        /// a new part and hears the phrase again, wholly or until the token ceiling cuts it off. So a part whose words
+        /// (without case or punctuation) are where an earlier part begins, "Купи хліб і молоко." then "Купи хліб", is
+        /// dropped. A part that goes on differently ("Купи також молоко.") stays. The price: "Добре." said twice, with a
+        /// pause between, becomes one; within one part, "так, так" stays.
+        /// </summary>
+        private static List<string> DropRepeatedParts(List<string> parts)
+        {
+            var kept = new List<string>(parts.Count);
+            var words = new List<string>();  // the words of the kept parts
+            var starts = new List<int>();    // where each kept part begins among them
+            foreach (string part in parts)
+            {
+                List<string> partWords = Words(part);
+                if (partWords.Count > 0 && RepeatsFromAPartStart(words, starts, partWords)) continue;
+
+                starts.Add(words.Count);
+                words.AddRange(partWords);
+                kept.Add(part);
+            }
+            return kept;
+        }
+
+        private static bool RepeatsFromAPartStart(List<string> words, List<int> starts, List<string> part)
+        {
+            foreach (int start in starts)
+            {
+                if (start + part.Count > words.Count) continue;
+
+                bool same = true;
+                for (int i = 0; i < part.Count && same; i++)
+                    same = string.Equals(words[start + i], part[i], StringComparison.CurrentCultureIgnoreCase);
+                if (same) return true;
+            }
+            return false;
+        }
+
+        // Words without the punctuation around them: "«Привіт," → "Привіт"; a lone dash is no word
+        private static List<string> Words(string text)
+        {
+            var words = new List<string>();
+            foreach (string token in text.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            {
+                int start = 0, end = token.Length;
+                while (start < end && char.IsPunctuation(token[start])) start++;
+                while (end > start && char.IsPunctuation(token[end - 1])) end--;
+                if (end > start) words.Add(token[start..end]);
+            }
+            return words;
         }
 
         private static string RemoveFillers(string text)

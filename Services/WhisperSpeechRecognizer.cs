@@ -31,6 +31,10 @@ namespace MovaCore.Services
         private const ulong XSTATE_MASK_AVX = 1UL << 2;
         private const int RelationProcessorCore = 0;
 
+        // whisper_full_with_state's result when the cache of several decoders (beam search, or the fallback that samples
+        // five candidates) does not fit in memory: it then frees the state it was given
+        private const int StateFreedByWhisper = -7;
+
         // Load order of a runtime folder: dependencies first, as Whisper.net does it
         private static readonly string[] RuntimeFiles =
         {
@@ -158,9 +162,12 @@ namespace MovaCore.Services
         }
 
         /// <summary>
-        /// Recognizes the samples with the loaded model and its one state. whisper.cpp takes the audio context from the
+        /// Recognizes the samples with the loaded model and its one state, and returns the text in the parts Whisper
+        /// marked with timestamps (<see cref="WhisperNative.ReadParts"/>). whisper.cpp takes the audio context from the
         /// parameters of each call, and the state's buffers are sized for the whole window, so every size shares it.
-        /// The parameters are those Whisper.net set before: its defaults plus what its builder was asked for.
+        /// The parameters are those Whisper.net set before (its defaults plus what its builder was asked for), except that
+        /// a graphics card decodes with beam search: five candidates instead of one, more accurate for a fraction of a
+        /// second there, while on a processor the decoder would cost several times as much.
         /// </summary>
         private unsafe IReadOnlyList<string> Transcribe(
             float[] samples, SpeechOptions options, int audioContext, CancellationToken cancellationToken)
@@ -168,14 +175,15 @@ namespace MovaCore.Services
             EnsureModelLoaded(options);
             if (samples.Length == 0) return Array.Empty<string>();
 
-            WhisperFullParams parameters = WhisperNative.DefaultParams();
+            WhisperFullParams parameters = WhisperNative.DefaultParams(
+                _loadedOnGpu ? WhisperNative.SamplingBeamSearch : WhisperNative.SamplingGreedy);
             parameters.Threads = ThreadCount(WhisperThreads.Max);
             parameters.NoContext = 1;
             parameters.PrintProgress = 0;
             if (audioContext < WhisperAudioContext.Full)
             {
                 // A short context makes Whisper prone to repeating the phrase once it is done: one segment, and a
-                // ceiling of ~15 tokens a second, far above speech, stop that loop (TranscriptText drops what is left)
+                // ceiling of ~15 tokens a second, far above speech, cut that loop short (TranscriptText drops the repeat)
                 parameters.AudioContext = audioContext;
                 parameters.SingleSegment = 1;
                 parameters.MaxTokens = audioContext / 4;
@@ -194,6 +202,13 @@ namespace MovaCore.Services
                     parameters.AbortCallbackUserData = GCHandle.ToIntPtr(cancellation);
                     result = WhisperNative.Full(_context, _state, parameters, audio, samples.Length);
                 }
+                if (result == StateFreedByWhisper)
+                {
+                    // Already freed: only the model is left to free, and the next dictation loads it again
+                    _state = IntPtr.Zero;
+                    Free();
+                    throw new InvalidOperationException("whisper.cpp ran out of memory for decoding and freed its state");
+                }
                 cancellationToken.ThrowIfCancellationRequested();
                 if (result != 0) throw new InvalidOperationException($"whisper.cpp could not transcribe (error {result})");
             }
@@ -201,15 +216,7 @@ namespace MovaCore.Services
             {
                 cancellation.Free();
             }
-
-            var segments = new List<string>();
-            int count = WhisperNative.SegmentCount(_state);
-            for (int i = 0; i < count; i++)
-            {
-                string text = WhisperNative.SegmentText(_state, i);
-                if (text.Length > 0) segments.Add(text);
-            }
-            return segments;
+            return WhisperNative.ReadParts(_context, _state);
         }
 
         // whisper.cpp asks before each computation whether to stop, so a cancelled dictation ends within a moment
@@ -281,7 +288,7 @@ namespace MovaCore.Services
                 throw new SpeechException(SpeechError.ModelUnsupported, ex.Message, ex);
             }
             AppLog.Info($"Speech model {Path.GetFileName(options.ModelPath)} loaded in " +
-                $"{Stopwatch.GetElapsedTime(started).TotalSeconds:0.0} s ({(onGpu ? "GPU" : "CPU")})");
+                $"{Stopwatch.GetElapsedTime(started).TotalSeconds:0.0} s ({(onGpu ? "GPU, beam search" : "CPU")})");
 
             // One state for every phrase: Whisper.net would create one, and its buffers, on each transcription
             started = Stopwatch.GetTimestamp();

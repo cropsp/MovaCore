@@ -18,12 +18,19 @@ All notable changes to MovaCore are documented here. The format follows
   threads.
 - On a graphics card, a short phrase is recognized about twice as fast: the working memory of speech recognition is
   now set up once, when the model loads, instead of for every phrase, which took about half of the time.
+- On a graphics card, speech recognition weighs five candidate transcriptions instead of one (beam search), as
+  whisper.cpp's own tool and OpenAI's Whisper do: fewer wrong letters and words, for a fraction of a second. On the
+  processor it still takes the single most likely one, since there the extra candidates would cost several times as
+  much.
 
 ### Added
 - The log names the graphics card that speech recognition runs on and how much memory it uses, to help find out why
   recognition is slow on a given computer.
 
 ### Fixed
+- A dictated phrase was sometimes pasted twice, or followed by its own beginning: when Whisper hears silence after the
+  phrase, it can start over and recognize the phrase again. Such a repeat is now dropped. It happened with the
+  30-second window of 1.2.0 too, more often with the short one.
 - With "Use the graphics card" turned off when MovaCore started, the speech recognition runtime was left for
   Whisper.net to pick, which could fail on computers without Vulkan.
 

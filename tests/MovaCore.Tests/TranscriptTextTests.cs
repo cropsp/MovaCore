@@ -83,6 +83,28 @@ namespace MovaCore.Tests
         public void RepeatedSegments_AreKeptOnce() =>
             Assert.Equal("Купи хліб і молоко.", TranscriptText.Clean(new[] { "Купи хліб і молоко.", " Купи хліб і молоко." }));
 
+        // Whisper starting over in a part of its own, cut short by the token ceiling or not
+        [Theory]
+        [InlineData(new[] { " Купи хліб і молоко.", " Купи хліб" }, "Купи хліб і молоко.")]
+        [InlineData(new[] { " Купи хліб і молоко.", " Купи" }, "Купи хліб і молоко.")]
+        [InlineData(new[] { " Привіт, як справи?", " привіт як" }, "Привіт, як справи?")]
+        [InlineData(new[] { " «Привіт», — сказав він.", " Привіт, сказав" }, "«Привіт», — сказав він.")]
+        [InlineData(new[] { " Привіт.", " Як справи?", " Як справи?" }, "Привіт. Як справи?")]
+        [InlineData(new[] { " Привіт.", " Як справи?", " Привіт. Як справи?" }, "Привіт. Як справи?")]
+        [InlineData(new[] { " Купи хліб і молоко.", " Купи хліб і молоко.", " Купи хліб" }, "Купи хліб і молоко.")]
+        [InlineData(new[] { " Купи хліб і молоко.", " [BLANK_AUDIO]", " Купи хліб" }, "Купи хліб і молоко.")]
+        public void PartsStartingOver_AreDropped(string[] parts, string expected) =>
+            Assert.Equal(expected, TranscriptText.Clean(parts));
+
+        [Theory]
+        [InlineData(new[] { " Купи хліб.", " Купи також молоко." }, "Купи хліб. Купи також молоко.")]
+        [InlineData(new[] { " Перше речення.", " Друге речення." }, "Перше речення. Друге речення.")]
+        [InlineData(new[] { " Так.", " Так, я згоден." }, "Так. Так, я згоден.")]
+        [InlineData(new[] { " Купи хліб.", " Купи хліб і молоко." }, "Купи хліб. Купи хліб і молоко.")]
+        [InlineData(new[] { " Я прийду завтра.", " Завтра буде пізно." }, "Я прийду завтра. Завтра буде пізно.")]
+        public void PartsGoingOn_AreKept(string[] parts, string expected) =>
+            Assert.Equal(expected, TranscriptText.Clean(parts));
+
         [Theory]
         [InlineData("Так, так.")]
         [InlineData("Це дуже дуже добре.")]
