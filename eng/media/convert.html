@@ -1,0 +1,169 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body><script>
+(() => {
+  const TAU = Math.PI * 2;
+  const theme = new URLSearchParams(location.search).get("theme") || "light";
+  const W = 360, H = 112, SCALE = 2, FPS = 20, LOOP = 8.4;
+  const LW = 1.6;
+  const FONT = "'DejaVu Sans', 'Segoe UI', sans-serif";
+
+  const WARM = { body: "#e9a257", shade: "#d97a3e", belly: "#fbf4e2", ear: "#f68c76", line: "#1b2a33" };
+  const THEMES = {
+    light: { page: "#ffffff", card: "#fbf4e2", cardEdge: "#e8d9bc", field: "#ffffff", fieldEdge: "#d9c7a5", text: "#1b2a33",
+             select: "#bcd8ff", key: "#ffffff", keyEdge: "#1b2a33", keyText: "#1b2a33", keyShadow: "#d9c7a5",
+             chip: "#1b2a33", chipText: "#fbf4e2", chipFlash: "#d97a3e", hint: "rgba(27,42,51,0.55)" },
+    dark:  { page: "#0d1117", card: "#1e1e20", cardEdge: "#34343a", field: "#2a2a2e", fieldEdge: "#45454c", text: "#fbf4e2",
+             select: "#2f5a8f", key: "#2a2a2e", keyEdge: "#fbf4e2", keyText: "#fbf4e2", keyShadow: "#0d0d10",
+             chip: "#fbf4e2", chipText: "#1e1e20", chipFlash: "#e9a257", hint: "rgba(251,244,226,0.55)" },
+  };
+  const T = THEMES[theme];
+
+  // ---- The logo's mouse head (as in the recording indicator) -------------------------------------
+  function ell(c, x, y, rx, ry, fill, stroke = true, rot = 0) {
+    c.beginPath(); c.ellipse(x, y, rx, ry, rot, 0, TAU);
+    if (fill) { c.fillStyle = fill; c.fill(); }
+    if (stroke) c.stroke();
+  }
+  function union(c, shapes, fill, pal) {
+    c.lineWidth = LW * 2; c.strokeStyle = pal.line;
+    for (const s of shapes) { c.beginPath(); c.ellipse(s[0], s[1], s[2], s[3], 0, 0, TAU); c.stroke(); }
+    c.fillStyle = fill;
+    for (const s of shapes) { c.beginPath(); c.ellipse(s[0], s[1], s[2], s[3], 0, 0, TAU); c.fill(); }
+    c.lineWidth = LW;
+  }
+  function ear(c, x, y, r, lift, pal) {
+    c.save(); c.translate(x, y - lift * 0.8); c.rotate(-0.3 * lift);
+    ell(c, 0, 0, r, r, pal.body); ell(c, r * 0.18, r * 0.12, r * 0.6, r * 0.62, pal.ear, false);
+    c.restore();
+  }
+  function eye(c, x, y, mode, pal) {
+    if (mode === "open") { ell(c, x, y, 1.8, 1.95, pal.line, false); ell(c, x + 0.65, y - 0.75, 0.62, 0.62, "#ffffff", false); return; }
+    c.beginPath();
+    if (mode === "closed") { c.moveTo(x - 1.9, y - 0.2); c.quadraticCurveTo(x, y + 1.7, x + 1.9, y - 0.2); }
+    else { c.moveTo(x - 1.9, y + 0.7); c.quadraticCurveTo(x, y - 1.6, x + 1.9, y + 0.7); }
+    c.stroke();
+  }
+  function head(c, x, y, s, eyeMode, lift) {
+    const pal = WARM;
+    c.save(); c.translate(x, y); c.scale(s, s);
+    c.lineJoin = "round"; c.lineCap = "round"; c.strokeStyle = pal.line; c.lineWidth = LW;
+    ear(c, -6.6, -8.4, 6.4, lift, pal); ear(c, 3.4, -10, 5.8, lift * 1.15, pal);
+    union(c, [[0, 1, 11, 9.5], [7, 3.2, 6.6, 5.6]], pal.body, pal);
+    ell(c, 7.9, 5.3, 5.4, 3.6, pal.belly, false);
+    eye(c, 3.6, -1.4, eyeMode, pal);
+    ell(c, 13.4, 1.9, 1.75, 1.35, pal.line, false);
+    c.beginPath(); c.moveTo(10.6, 5.7); c.quadraticCurveTo(11.8, 6.7, 13, 5.5); c.stroke();
+    c.lineWidth = LW * 0.55; c.beginPath();
+    c.moveTo(10.4, 3.3); c.lineTo(18, 1.2); c.moveTo(10.7, 4.3); c.lineTo(18.3, 4.7); c.moveTo(10.5, 5.1); c.lineTo(17.4, 7.9);
+    c.stroke();
+    c.restore();
+  }
+
+  function rrect(c, x, y, w, h, r) {
+    c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
+  }
+  const ease = p => p < 0 ? 0 : p > 1 ? 1 : 1 - Math.pow(1 - p, 3);
+
+  // ---- Timeline (seconds) ---------------------------------------------------------------------------
+  const TYPO = "ghbdsn", FIXED = "привіт", MORE = ", як справи?";
+  const TYPE1 = 0.4, STEP1 = 0.16;            // typing the wrong-layout word
+  const SEL0 = 1.75, SEL1 = 2.15;             // selecting it
+  const KEY_IN = 2.35, KEY_DOWN = 2.75, KEY_UP = 2.95; // F10 appears, is pressed, released: converted on release
+  const DESEL = 3.65, TYPE2 = 3.85, STEP2 = 0.12;
+  const KEY_OUT = 4.0, FADE = 7.6;
+
+  const card = { x: 6, y: 6, w: W - 12, h: H - 12 };
+  const field = { x: 66, y: 38, w: 206, h: 40 };
+  const key = { x: 286, y: 39, w: 52, h: 38 };
+  const chip = { x: card.x + card.w - 56, y: 14, w: 44, h: 17 };
+
+  function frame(c, t) {
+    c.fillStyle = T.page; c.fillRect(0, 0, W, H);
+    // the card, with a soft shadow on the page
+    c.save(); c.shadowColor = theme === "dark" ? "rgba(0,0,0,0.5)" : "rgba(27,42,51,0.18)"; c.shadowBlur = 8; c.shadowOffsetY = 2;
+    rrect(c, card.x, card.y, card.w, card.h, 16); c.fillStyle = T.card; c.fill(); c.restore();
+    rrect(c, card.x + 0.5, card.y + 0.5, card.w - 1, card.h - 1, 16); c.lineWidth = 1; c.strokeStyle = T.cardEdge; c.stroke();
+
+    // keyboard layout indicator, as on the taskbar
+    const converted = t >= KEY_UP;
+    const flash = converted ? Math.max(0, 1 - (t - KEY_UP) / 0.5) : 0;
+    rrect(c, chip.x, chip.y, chip.w, chip.h, 8.5);
+    c.fillStyle = flash > 0 ? T.chipFlash : T.chip; c.fill();
+    c.fillStyle = T.chipText; c.font = `700 10px ${FONT}`; c.textAlign = "center"; c.textBaseline = "middle";
+    c.fillText(converted ? "УКР" : "ENG", chip.x + chip.w / 2, chip.y + chip.h / 2 + 0.5);
+    c.textAlign = "start";
+
+    // the field
+    rrect(c, field.x, field.y, field.w, field.h, 10); c.fillStyle = T.field; c.fill();
+    c.lineWidth = 1.2; c.strokeStyle = T.fieldEdge; c.stroke();
+
+    let word = "", more = "";
+    if (!converted) word = TYPO.slice(0, Math.max(0, Math.min(TYPO.length, Math.floor((t - TYPE1) / STEP1) + 1)));
+    else {
+      word = FIXED;
+      more = MORE.slice(0, Math.max(0, Math.min(MORE.length, Math.floor((t - TYPE2) / STEP2) + 1)));
+      if (t < TYPE2) more = "";
+    }
+    const text = word + more;
+    c.font = `500 16px ${FONT}`; c.textBaseline = "alphabetic";
+    const tx = field.x + 13, ty = field.y + field.h / 2 + 6;
+    const wordW = c.measureText(word).width;
+
+    // the selection: grows leftwards (Ctrl+Shift+Left), stays on the converted word until the caret moves
+    let selFrom = 0, selTo = 0;
+    if (t >= SEL0 && t < DESEL) {
+      const p = converted ? 1 : ease((t - SEL0) / (SEL1 - SEL0));
+      selTo = wordW; selFrom = wordW * (1 - p);
+    }
+    if (selTo > selFrom) { c.fillStyle = T.select; c.fillRect(tx + selFrom - 1, field.y + 9, selTo - selFrom + 2, field.h - 18); }
+
+    const fade = t >= FADE ? Math.max(0, 1 - (t - FADE) / 0.5) : 1;
+    c.globalAlpha = fade;
+    c.fillStyle = T.text; c.fillText(text, tx, ty);
+    c.globalAlpha = 1;
+
+    // caret: hidden while there is a selection, blinking while idle
+    const typing = (t >= TYPE1 && t < TYPE1 + STEP1 * TYPO.length + 0.2) || (t >= TYPE2 && t < TYPE2 + STEP2 * MORE.length + 0.2);
+    const blinkOn = typing || Math.floor(t / 0.5) % 2 === 0;
+    if (!(selTo > selFrom) && blinkOn && fade > 0.5) {
+      const cx = tx + c.measureText(text).width + 1.5;
+      c.fillStyle = T.text; c.fillRect(cx, field.y + 10, 1.4, field.h - 20);
+    }
+
+    // the hotkey: pops in, goes down, comes up (the conversion happens on release), then fades
+    if (t >= KEY_IN && t < KEY_OUT + 0.3) {
+      const pin = ease((t - KEY_IN) / 0.2);
+      const out = t >= KEY_OUT ? 1 - (t - KEY_OUT) / 0.3 : 1;
+      const down = t >= KEY_DOWN && t < KEY_UP ? 1 : 0;
+      c.save();
+      c.globalAlpha = Math.max(0, Math.min(1, out)) * pin;
+      const s = 0.8 + 0.2 * pin;
+      c.translate(key.x + key.w / 2, key.y + key.h / 2); c.scale(s, s); c.translate(-key.w / 2, -key.h / 2);
+      const off = down * 3;
+      rrect(c, 0, 4, key.w, key.h - 2, 8); c.fillStyle = T.keyShadow; c.fill();
+      rrect(c, 0, off, key.w, key.h - 4, 8); c.fillStyle = T.key; c.fill();
+      c.lineWidth = 1.6; c.strokeStyle = T.keyEdge; c.stroke();
+      c.fillStyle = T.keyText; c.font = `700 15px ${FONT}`; c.textAlign = "center"; c.textBaseline = "middle";
+      c.fillText("F10", key.w / 2, off + (key.h - 4) / 2 + 1);
+      c.restore(); c.textAlign = "start";
+    }
+
+    // the mouse: watches, winks once the text is fixed
+    const winking = t >= KEY_UP && t < KEY_UP + 0.7;
+    const blink = !winking && (t % 3.3) > 3.18;
+    const lift = winking ? Math.sin(Math.min(1, (t - KEY_UP) / 0.35) * Math.PI) : 0;
+    head(c, 31, 60, 1.55, winking ? "wink" : blink ? "closed" : "open", lift);
+  }
+
+  const canvas = document.createElement("canvas"); canvas.width = W * SCALE; canvas.height = H * SCALE;
+  const c = canvas.getContext("2d");
+  const frames = [];
+  for (let f = 0; f < LOOP * FPS; f++) {
+    c.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+    frame(c, f / FPS);
+    frames.push(canvas.toDataURL("image/png"));
+  }
+  const pre = document.createElement("pre"); pre.id = "frames"; pre.textContent = frames.join("\n");
+  document.body.appendChild(pre);
+})();
+</script></body></html>

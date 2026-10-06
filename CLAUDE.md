@@ -12,7 +12,9 @@ Native AOT cannot embed (SharpHook's `uiohook.dll`, the Whisper runtimes in `run
 The root namespace is `MovaCore`.
 
 A prioritized review of known bugs and the roadmap lives in `docs/IMPROVEMENT_PLAN.md` (in Ukrainian); check it
-before changing behaviour, since many "odd" things in the code are already catalogued there.
+before changing behaviour, since many "odd" things in the code are already catalogued there. Its section "Стан після v1.2.0
+і план наступних робіт" is the hand-off between sessions: what is on the branch but not released, what the owner
+decided, what the testers' logs showed, and the next stages (whisper state reuse, GPU picker, first-run guide).
 
 ## Commands
 
@@ -182,7 +184,8 @@ editing the `.ico`/`.png` by hand.
 The README exists in English (`README.md`) and Ukrainian (`README.uk.md`) with the same sections in the same order
 and a language switcher at the top; change both together, using the UI labels from `Strings.cs`. It is written for
 users first (download, quick start, privacy, FAQ); implementation details belong in its "For developers" section.
-The animations and the social preview in `docs/media` are rendered illustrations, not screenshots.
+The animations and the social preview in `docs/media` are rendered illustrations, not screenshots: regenerate them
+with `eng/media/make-media.py` (Node + Playwright, Pillow) from the canvas pages in `eng/media` instead of editing them.
 
 One top-level type per file; interfaces live next to their implementations in `Services/`.
 
