@@ -121,10 +121,10 @@ starting: wait until the grass turns green.
 
 - MovaCore watches the keyboard only to notice its hotkeys. It does not record or store what you type, and it reads
   the selected text only when you press the hotkey.
-- Speech is recognized on your computer. Audio is never saved or sent anywhere, and neither is the recognized text:
+- Speech is recognized on your computer. Audio is never saved or sent anywhere. Recognized text is never sent either:
   the last 10 phrases stay in memory for the tray menu's **Last phrases** until MovaCore exits, and go to a file
-  (`%LOCALAPPDATA%\MovaCore\history.json`) only if you turn on **Remember the last phrases after a restart** on the
-  Voice tab. Turning it off deletes the file.
+  (`%LOCALAPPDATA%\MovaCore\history.json`) only if you turn on **Remember the last dictated phrases after a restart**
+  in Settings → General. Turning it off deletes the file.
 - There is no telemetry and no account. The only network connection is the speech model download from
   huggingface.co, after you turn voice input on.
 - Settings are stored in `%APPDATA%\MovaCore\settings.json`, downloaded models in `%LOCALAPPDATA%\MovaCore\models`,

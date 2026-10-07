@@ -449,8 +449,6 @@ namespace MovaCore.UI
             ConfigureCheckBox(_fastRecognitionCheckBox, Strings.SpeechFastRecognition, _settings.SpeechFastRecognition);
             _toolTip.SetToolTip(_fastRecognitionCheckBox, Strings.SpeechFastRecognitionTooltip);
             ConfigureCheckBox(_overlayCheckBox, Strings.SpeechShowOverlay, _settings.SpeechShowOverlay);
-            ConfigureCheckBox(_historyCheckBox, Strings.SpeechHistoryOnDisk, _settings.SpeechHistoryOnDisk);
-            _toolTip.SetToolTip(_historyCheckBox, Strings.SpeechHistoryOnDiskTooltip);
 
             return CreateGroup(
                 Strings.SpeechRecognitionGroup,
@@ -458,8 +456,7 @@ namespace MovaCore.UI
                 CreateLabeledRow(new Label { Text = Strings.SpeechMicrophoneLabel }, _microphoneComboBox),
                 CreateLabeledRow(new Label { Text = Strings.SpeechGpuLabel }, _gpuComboBox),
                 _fastRecognitionCheckBox,
-                _overlayCheckBox,
-                _historyCheckBox);
+                _overlayCheckBox);
         }
 
         private Control CreateGeneralGroup()
@@ -467,6 +464,9 @@ namespace MovaCore.UI
             ConfigureCheckBox(_startupCheckBox, Strings.LaunchAtStartup, _settings.LaunchAtStartup);
             ConfigureCheckBox(_notifyCheckBox, Strings.ShowNotifications, _settings.ShowNotifications);
             ConfigureCheckBox(_restoreClipboardCheckBox, Strings.RestoreClipboard, _settings.RestoreClipboard);
+            // Here, not on the Voice tab: that one is the tallest, and must fit a 1080p screen at 150 %
+            ConfigureCheckBox(_historyCheckBox, Strings.SpeechHistoryOnDisk, _settings.SpeechHistoryOnDisk);
+            _toolTip.SetToolTip(_historyCheckBox, Strings.SpeechHistoryOnDiskTooltip);
 
             ConfigureComboBox(
                 _languageComboBox,
@@ -488,6 +488,7 @@ namespace MovaCore.UI
                 _startupCheckBox,
                 _notifyCheckBox,
                 _restoreClipboardCheckBox,
+                _historyCheckBox,
                 CreateLabeledRow(copyPasteLabel, _copyPasteComboBox),
                 CreateLabeledRow(new Label { Text = Strings.LanguageLabel }, _languageComboBox));
         }
@@ -583,7 +584,7 @@ namespace MovaCore.UI
             foreach (Control control in new Control[]
             {
                 _speechPicker, _modelComboBox, _customModelRow, _speechLanguageComboBox, _microphoneComboBox,
-                _fastRecognitionCheckBox, _overlayCheckBox, _historyCheckBox,
+                _fastRecognitionCheckBox, _overlayCheckBox,
             })
             {
                 control.Enabled = enabled;

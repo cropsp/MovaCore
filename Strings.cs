@@ -412,15 +412,15 @@ namespace MovaCore
         public static string SpeechShowOverlay => T("Show the recording indicator", "Показувати індикатор запису");
 
         public static string SpeechHistoryOnDisk => T(
-            "Remember the last phrases after a restart", "Пам'ятати останні фрази й після перезапуску");
+            "Remember the last dictated phrases after a restart", "Пам'ятати останні продиктовані фрази й після перезапуску");
 
         public static string SpeechHistoryOnDiskTooltip => T(
             "The last 10 dictated phrases are always in the tray menu, Last phrases, until MovaCore exits. With this on, they are also kept in a file on this computer (%LOCALAPPDATA%\\MovaCore\\history.json); turning it off deletes the file.",
             "Останні 10 продиктованих фраз завжди є в меню трею «Останні фрази», доки MovaCore працює. Якщо ввімкнути, вони ще й зберігаються у файлі на цьому комп'ютері (%LOCALAPPDATA%\\MovaCore\\history.json); вимкнення видаляє файл.");
 
         public static string SpeechPrivacy => T(
-            "Audio is processed on this computer only: it is never saved or sent anywhere, and neither is the text. The internet is used only to download the model from huggingface.co.",
-            "Звук обробляється лише на цьому комп'ютері: він не зберігається й нікуди не надсилається, текст теж нікуди не надсилається. Інтернет потрібен тільки для завантаження моделі з huggingface.co.");
+            "Audio is processed on this computer only: it is never saved or sent anywhere. The internet is used only to download the model from huggingface.co.",
+            "Звук обробляється лише на цьому комп'ютері: він не зберігається й нікуди не надсилається. Інтернет потрібен тільки для завантаження моделі з huggingface.co.");
 
         /// <summary>A Whisper language code as listed in the settings; language names are in their own language.</summary>
         public static string SpeechLanguageName(string code) => code switch
