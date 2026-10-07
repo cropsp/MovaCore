@@ -9,16 +9,14 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using MovaCore.Models;
 using MovaCore.Services;
+using static MovaCore.UI.FormLayout;
 
 namespace MovaCore.UI
 {
     public class SettingsForm : Form
     {
-        // Sizes are in pixels at 96 DPI: AutoScaleMode.Dpi scales them to the monitor's DPI
-        private const int ContentWidth = 430; // inner width of a group; longer texts wrap instead of widening the form
+        // Sizes are in pixels at 96 DPI (see FormLayout)
         private const int ComboWidth = 220;
-        private const int ButtonMinWidth = 96;
-        private const int ButtonMinHeight = 30;
         private const int ExcludedBoxHeight = 72; // about four lines
         private const string ModelsPageUrl = "https://huggingface.co/ggerganov/whisper.cpp/tree/main";
 
@@ -294,11 +292,16 @@ namespace MovaCore.UI
         {
             ConfigureCheckBox(_speechEnabledCheckBox, Strings.SpeechEnable, _settings.SpeechEnabled);
             _speechEnabledCheckBox.Margin = new Padding(3, 3, 3, 8);
-            _speechEnabledCheckBox.CheckedChanged += (_, _) => UpdateVoiceControls();
-
             _speechPicker = CreateHotkeyPicker(
                 _settings.SpeechHotkey,
                 hotkey => hotkey == _triggerPicker.Value ? Strings.HotkeyUsedForConversion : null);
+
+            _speechEnabledCheckBox.CheckedChanged += (_, _) =>
+            {
+                UpdateVoiceControls();
+                // Many compact keyboards have no ScrollLock: turning voice input on asks for the key right away
+                if (_speechEnabledCheckBox.Checked) _speechPicker.StartCapture(Strings.SpeechHotkeyPrompt(_speechPicker.Value.ToString()));
+            };
 
             TableLayoutPanel content = CreatePanel(new ColumnStyle(SizeType.AutoSize));
             AddRow(content, _speechEnabledCheckBox);
@@ -527,54 +530,6 @@ namespace MovaCore.UI
 
         // Layout helpers
 
-        private static TableLayoutPanel CreatePanel(params ColumnStyle[] columns)
-        {
-            var panel = new TableLayoutPanel
-            {
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                ColumnCount = columns.Length,
-                Dock = DockStyle.Fill,
-                Margin = Padding.Empty,
-            };
-            foreach (ColumnStyle column in columns) panel.ColumnStyles.Add(column);
-            return panel;
-        }
-
-        private static void AddRow(TableLayoutPanel panel, Control control)
-        {
-            int row = panel.RowStyles.Count;
-            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            panel.RowCount = row + 1;
-            panel.Controls.Add(control, 0, row);
-        }
-
-        private static GroupBox CreateGroup(string title, params Control[] rows)
-        {
-            TableLayoutPanel content = CreatePanel(new ColumnStyle(SizeType.AutoSize));
-            foreach (Control row in rows) AddRow(content, row);
-
-            var group = new GroupBox
-            {
-                Text = title,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Dock = DockStyle.Fill,
-                Padding = new Padding(8, 4, 8, 8),
-                Margin = new Padding(0, 0, 0, 8),
-            };
-            group.Controls.Add(content);
-            return group;
-        }
-
-        private static Label CreateHint(string text) => new()
-        {
-            Text = text,
-            AutoSize = true,
-            MaximumSize = new Size(ContentWidth, 0),
-            ForeColor = SystemColors.GrayText,
-        };
-
         private static TableLayoutPanel CreateLabeledRow(Label label, ComboBox comboBox)
         {
             label.AutoSize = true;
@@ -589,15 +544,6 @@ namespace MovaCore.UI
             return row;
         }
 
-        private static void ConfigureCheckBox(CheckBox checkBox, string text, bool isChecked)
-        {
-            checkBox.Text = text;
-            checkBox.Checked = isChecked;
-            checkBox.AutoSize = true;
-            checkBox.MaximumSize = new Size(ContentWidth, 0); // wraps a long text instead of widening the form
-            checkBox.Anchor = AnchorStyles.Left;
-        }
-
         private static void ConfigureComboBox(ComboBox comboBox, string accessibleName, object[] items, int selectedIndex)
         {
             comboBox.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -607,13 +553,6 @@ namespace MovaCore.UI
             comboBox.Items.AddRange(items);
             // A value written by hand into settings.json can be unknown: show the first item then
             comboBox.SelectedIndex = Math.Max(selectedIndex, 0);
-        }
-
-        private static void ConfigureButton(Button button)
-        {
-            button.AutoSize = true;
-            button.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-            button.MinimumSize = new Size(ButtonMinWidth, ButtonMinHeight);
         }
 
         private static int IndexOf<T>(IReadOnlyList<T> items, T item)

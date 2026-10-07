@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -33,11 +34,16 @@ namespace MovaCore
         // Created together with the tray menu, after the language is known (see ApplyLanguage)
         private ToolStripMenuItem? _settingsItem;
         private ToolStripMenuItem? _pauseItem;
+        private ToolStripMenuItem? _firstStepsItem;
         private ToolStripMenuItem? _aboutItem;
         private ToolStripMenuItem? _exitItem;
 
-        private SettingsForm? _settingsForm; // the open settings window, if any
+        private Form? _openDialog; // the settings or first steps window, if one is open: one at a time
         private bool _paused; // not persisted: MovaCore always starts active
+
+        // Each hint is shown at most once a session (UI thread only)
+        private bool _nothingSelectedHinted;
+        private bool _slowRecognitionHinted;
 
         public TrayApplicationContext(
             IHotkeyService hotkeyService,
@@ -75,9 +81,11 @@ namespace MovaCore
             // The events below arrive on worker threads, but NotifyIcon may only be used on this (UI) thread
             _uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
             _orchestrator.ConversionFailed += OnConversionFailed;
+            _orchestrator.NothingSelected += OnNothingSelected;
             _hotkeyService.HookFailed += OnHookFailed;
             _speech.StateChanged += OnSpeechStateChanged;
             _speech.TextPasted += OnTextPasted;
+            _speech.RecognitionSlow += OnRecognitionSlow;
             _downloads.StateChanged += OnDownloadStateChanged;
             _downloads.ModelDeleted += OnModelDeleted;
 
@@ -147,11 +155,13 @@ namespace MovaCore
         // Does nothing while the tray icon does not exist yet: the constructor applies the language first
         private void UpdateTrayTexts()
         {
-            if (_settingsItem == null || _pauseItem == null || _aboutItem == null || _exitItem == null) return;
+            if (_settingsItem == null || _pauseItem == null || _firstStepsItem == null || _aboutItem == null || _exitItem == null)
+                return;
 
             _settingsItem.Text = Strings.MenuSettings;
             _pauseItem.Text = Strings.MenuPause;
             _pauseItem.Checked = _paused;
+            _firstStepsItem.Text = Strings.MenuFirstSteps;
             _aboutItem.Text = Strings.MenuAbout;
             _exitItem.Text = Strings.MenuExit;
             UpdateTrayStatus();
@@ -198,6 +208,37 @@ namespace MovaCore
                     _notifyIcon.ShowBalloonTip(3000, AppName, message, ToolTipIcon.Info);
                 }
             }, null);
+        }
+
+        // Raised on a worker thread. New users press the hotkey before selecting anything, and nothing seems to happen.
+        private void OnNothingSelected(object? sender, EventArgs e)
+        {
+            _uiContext.Post(_ =>
+            {
+                if (_nothingSelectedHinted || !_currentSettings.ShowNotifications) return;
+                _nothingSelectedHinted = true;
+                _notifyIcon.ShowBalloonTip(
+                    4000, AppName, Strings.HintNothingSelected(_currentSettings.Trigger.ToString()), ToolTipIcon.Info);
+            }, null);
+        }
+
+        // Raised on a worker thread
+        private void OnRecognitionSlow(object? sender, EventArgs e) => _uiContext.Post(_ => ShowRecognitionAdvice(), null);
+
+        private void ShowRecognitionAdvice()
+        {
+            if (_slowRecognitionHinted || !_currentSettings.ShowNotifications) return;
+            RecognitionAdvice advice = RecognitionAdvisor.Choose(
+                _currentSettings.SpeechFastRecognition,
+                _currentSettings.SpeechUseGpu,
+                VulkanDevices.List().Count,
+                WhisperSpeechRecognizer.ProcessorRuntimeLoaded,
+                RuntimeInformation.ProcessArchitecture != Architecture.Arm64);
+            if (advice == RecognitionAdvice.None) return;
+
+            _slowRecognitionHinted = true;
+            AppLog.Info($"Dictation: recognition is slow, advised {advice}");
+            _notifyIcon.ShowBalloonTip(8000, AppName, Strings.RecognitionAdviceText(advice), ToolTipIcon.Info);
         }
 
         // Raised on a worker thread
@@ -275,7 +316,9 @@ namespace MovaCore
                 ApplySpeechSettings();
             if (!_currentSettings.ShowNotifications) return;
 
-            if (state.Status == ModelDownloadStatus.Completed && state.ModelId == _currentSettings.SpeechModel)
+            // Downloaded from the first steps window, before voice input is on: that window says it itself
+            if (state.Status == ModelDownloadStatus.Completed && state.ModelId == _currentSettings.SpeechModel
+                && _currentSettings.SpeechEnabled)
             {
                 _notifyIcon.ShowBalloonTip(
                     4000, AppName, Strings.BalloonModelReady(_currentSettings.SpeechHotkey.ToString()), ToolTipIcon.Info);
@@ -303,12 +346,14 @@ namespace MovaCore
 
             _settingsItem = new ToolStripMenuItem(Strings.MenuSettings, null, (s, e) => ShowSettings());
             _pauseItem = new ToolStripMenuItem(Strings.MenuPause, null, (s, e) => TogglePause());
+            _firstStepsItem = new ToolStripMenuItem(Strings.MenuFirstSteps, null, (s, e) => ShowFirstSteps());
             _aboutItem = new ToolStripMenuItem(Strings.MenuAbout, null, (s, e) => ShowAbout());
             _exitItem = new ToolStripMenuItem(Strings.MenuExit, null, (s, e) => Exit());
 
             menu.Items.Add(_settingsItem);
             menu.Items.Add(_pauseItem);
             menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(_firstStepsItem);
             menu.Items.Add(_aboutItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(_exitItem);
@@ -348,22 +393,53 @@ namespace MovaCore
 
         private void OnSpeechHotkeyReleased(object? sender, EventArgs e) => _speech.OnHotkeyReleased();
 
-        private void ShowSettings()
+        private void ShowSettings() => ShowDialog(() =>
+            new SettingsForm(
+                _currentSettings, ct => _hotkeyService.CaptureHotkeyAsync(ct), _recorder.GetInputDevices(), VulkanDevices.List(),
+                _downloads),
+            OnSettingsClosed);
+
+        private void ShowFirstSteps()
         {
-            // A modal dialog does not block the tray icon, so the menu can ask for the window again
-            if (_settingsForm != null)
+            bool firstRun = _settingsService.IsFirstRun;
+            ShowDialog(
+                () => new FirstStepsForm(_currentSettings, ct => _hotkeyService.CaptureHotkeyAsync(ct), _downloads, firstRun),
+                form => OnFirstStepsClosed((FirstStepsForm)form, firstRun));
+        }
+
+        /// <summary>At the first run, once the tray icon is there: what MovaCore does and how to start.</summary>
+        public void ShowFirstStepsSoon() => _uiContext.Post(_ => ShowFirstSteps(), null);
+
+        /// <summary>Shows the settings or the first steps, one window at a time, and hands it to <paramref name="closed"/>.</summary>
+        private void ShowDialog(Func<Form> create, Action<Form> closed)
+        {
+            // A modal dialog does not block the tray icon, so the menu can ask for a window again
+            if (_openDialog != null)
             {
-                _settingsForm.Activate();
+                _openDialog.Activate();
                 return;
             }
 
-            // No dictation while the settings are open: its hotkey may be about to change. A recording in progress is
+            // No dictation while the window is open: its hotkey may be about to change. A recording in progress is
             // dropped; a transcription finishes and pastes as usual.
             _hotkeyService.SetSpeechHotkey(null);
             if (_speechState == SpeechState.Recording) _speech.Cancel();
             try
             {
-                ShowSettingsDialog();
+                using Form form = create();
+                _openDialog = form;
+                // Pausing or resuming while a hotkey is being recorded would leave the hook in the wrong state
+                _pauseItem?.Enabled = false;
+                try
+                {
+                    form.ShowDialog();
+                }
+                finally
+                {
+                    _openDialog = null;
+                    _pauseItem?.Enabled = true;
+                }
+                closed(form);
             }
             finally
             {
@@ -372,35 +448,53 @@ namespace MovaCore
             }
         }
 
-        private void ShowSettingsDialog()
+        private void OnSettingsClosed(Form form)
         {
-            using var form = new SettingsForm(
-                _currentSettings, ct => _hotkeyService.CaptureHotkeyAsync(ct), _recorder.GetInputDevices(), VulkanDevices.List(),
-                _downloads);
-            _settingsForm = form;
-            // Pausing or resuming while a hotkey is being recorded would leave the hook in the wrong state
-            _pauseItem?.Enabled = false;
+            if (form.DialogResult != DialogResult.OK || ((SettingsForm)form).UpdatedSettings is not { } updatedSettings) return;
 
-            DialogResult result;
-            try
+            bool gpuChosen = updatedSettings.SpeechUseGpu && !_currentSettings.SpeechUseGpu;
+            if (!ApplyAndSave(updatedSettings)) return;
+
+            if (_currentSettings.ShowNotifications)
             {
-                result = form.ShowDialog();
-            }
-            finally
-            {
-                _settingsForm = null;
-                _pauseItem?.Enabled = true;
+                _notifyIcon.ShowBalloonTip(2000, AppName, Strings.BalloonSettingsSaved, ToolTipIcon.Info);
             }
 
-            if (result != DialogResult.OK || form.UpdatedSettings is not { } updatedSettings) return;
+            // From Processor only to a graphics card: the processor's runtime stays loaded until MovaCore restarts
+            if (gpuChosen && _currentSettings.SpeechEnabled && WhisperSpeechRecognizer.ProcessorRuntimeLoaded
+                && VulkanDevices.List().Count > 0
+                && MessageBox.Show(Strings.RestartForGpuPrompt, AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Question)
+                    == DialogResult.Yes)
+            {
+                Restart();
+            }
+        }
 
-            _currentSettings = updatedSettings;
+        private void OnFirstStepsClosed(FirstStepsForm form, bool firstRun)
+        {
+            if (form.UpdatedSettings is not { } updated) return;
+
+            // Saved at the first run even unchanged: the settings file marks that the first steps were shown
+            bool changed = updated.LaunchAtStartup != _currentSettings.LaunchAtStartup
+                || updated.SpeechEnabled != _currentSettings.SpeechEnabled
+                || updated.SpeechHotkey != _currentSettings.SpeechHotkey;
+            if ((changed || firstRun) && !ApplyAndSave(updated)) return;
+
+            if (firstRun && _currentSettings.ShowNotifications)
+                _notifyIcon.ShowBalloonTip(5000, AppName, Strings.BalloonFirstRun, ToolTipIcon.Info);
+        }
+
+        /// <summary>Applies the settings and saves them; false (after telling the user) if they could not be saved.</summary>
+        private bool ApplyAndSave(AppSettings settings)
+        {
+            _currentSettings = settings;
             ApplySettings();
             ApplyLanguage();
 
             try
             {
                 _settingsService.Save(_currentSettings);
+                return true;
             }
             catch (Exception ex)
             {
@@ -410,13 +504,30 @@ namespace MovaCore
                     AppName,
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Starts another MovaCore and exits. The new one waits for this one to be gone (Program: --restarted-from), or the
+        /// single-instance check would turn it away.
+        /// </summary>
+        private void Restart()
+        {
+            try
+            {
+                string path = Environment.ProcessPath ?? throw new InvalidOperationException("The executable path is unknown");
+                Process.Start(new ProcessStartInfo(path, $"--restarted-from {Environment.ProcessId}") { UseShellExecute = false })
+                    ?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                AppLog.Error("Could not restart MovaCore", ex);
+                MessageBox.Show(Strings.RestartFailed(ex.Message), AppName, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
-
-            if (_currentSettings.ShowNotifications)
-            {
-                _notifyIcon.ShowBalloonTip(2000, AppName, Strings.BalloonSettingsSaved, ToolTipIcon.Info);
-            }
+            AppLog.Info("Restarting");
+            Exit();
         }
 
         private void ShowAbout()
@@ -454,11 +565,13 @@ namespace MovaCore
             if (disposing)
             {
                 _orchestrator.ConversionFailed -= OnConversionFailed;
+                _orchestrator.NothingSelected -= OnNothingSelected;
                 _hotkeyService.HookFailed -= OnHookFailed;
                 _hotkeyService.SpeechHotkeyPressed -= OnSpeechHotkeyPressed;
                 _hotkeyService.SpeechHotkeyReleased -= OnSpeechHotkeyReleased;
                 _speech.StateChanged -= OnSpeechStateChanged;
                 _speech.TextPasted -= OnTextPasted;
+                _speech.RecognitionSlow -= OnRecognitionSlow;
                 _downloads.StateChanged -= OnDownloadStateChanged;
                 _downloads.ModelDeleted -= OnModelDeleted;
                 _notifyIcon?.Dispose();

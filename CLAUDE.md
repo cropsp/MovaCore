@@ -192,7 +192,16 @@ GPU checkbox: Automatic, the cards, Processor only); a `TabControl` does not siz
 `FitTabsToPages` sizes it from the largest page. Both hotkeys are recorded by `UI/HotkeyPicker` through
 `IHotkeyService.CaptureHotkeyAsync`, which refuses a combination the other hotkey uses. `OnSaveClick` builds a new
 `AppSettings`: a field it does not copy resets to its default. The tray offers Settings, Pause
-(stops the hook; not persisted), About and Exit, and only one settings window at a time.
+(stops the hook; not persisted), First steps, About and Exit, and only one window (settings or first steps) at a time.
+`UI/FirstStepsForm.cs` opens at the first run (`SettingsService.IsFirstRun`: no settings file; saving ends it, so
+closing the window saves) and from the tray: the hotkey tried on "ghbdsn" in a text box of its own (the global
+hotkey works in our own windows), voice input turned on with `HotkeyPicker.StartCapture` (turning it on in Settings
+asks for the key too), its model download, how to pin the tray icon (`ms-settings:taskbar`) and autostart; it changes
+a `Clone` of the settings. The shared layout helpers live in `UI/FormLayout.cs`. Hints are balloons shown once a
+session: `HotkeyOrchestrator.NothingSelected`, and `SpeechOrchestrator.RecognitionSlow` (`IsSlow`) with the advice
+from `RecognitionAdvisor`. The processor's Whisper runtime stays for the process
+(`WhisperSpeechRecognizer.ProcessorRuntimeLoaded`), so choosing a card after it offers a restart: a new process with
+`--restarted-from <pid>` waits for this one to exit before the single-instance check.
 
 All user-visible text lives in `Strings.cs` (English and Ukrainian, chosen by `AppSettings.Language`, where `Auto`
 follows the Windows display language via `UI/WindowsLanguage.cs`); an in-code table keeps it simple under AOT.

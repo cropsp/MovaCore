@@ -65,6 +65,14 @@ namespace MovaCore.Models
         /// <summary>Show the small recording indicator near the bottom of the screen.</summary>
         public bool SpeechShowOverlay { get; set; } = true;
 
+        /// <summary>A copy that can be changed without touching this one.</summary>
+        public AppSettings Clone()
+        {
+            var copy = (AppSettings)MemberwiseClone();
+            copy.ExcludedProcesses = new List<string>(ExcludedProcesses);
+            return copy;
+        }
+
         [JsonIgnore]
         public Hotkey Trigger
         {

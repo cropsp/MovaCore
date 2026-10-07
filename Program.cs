@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -36,6 +37,9 @@ namespace MovaCore
 
             // Until the settings are loaded, messages follow the Windows display language
             Strings.Language = WindowsLanguage.Resolve(UiLanguage.Auto);
+
+            // A restart (TrayApplicationContext.Restart) starts this copy while the old one is still exiting
+            if (int.TryParse(ArgumentValue(args, "--restarted-from"), out int previousProcess)) WaitForExit(previousProcess);
 
             // Only one instance per user session: a second tray icon would be confusing,
             // and both instances would overwrite each other's settings.
@@ -86,6 +90,7 @@ namespace MovaCore
             var settings = new SettingsService(new StartupRegistration());
             using var context = new TrayApplicationContext(hotkeys, orchestrator, settings, speech, recorder, downloads);
 
+            if (!smokeTest && settings.IsFirstRun) context.ShowFirstStepsSoon();
             if (smokeTest)
             {
                 SmokeTest.Schedule(
@@ -107,6 +112,19 @@ namespace MovaCore
         {
             int index = Array.IndexOf(args, name);
             return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+        }
+
+        private static void WaitForExit(int processId)
+        {
+            try
+            {
+                using var process = Process.GetProcessById(processId);
+                if (!process.WaitForExit(TimeSpan.FromSeconds(15))) AppLog.Info("The previous MovaCore is still running");
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            {
+                // Gone already
+            }
         }
 
         private static void RegisterExceptionHandlers(bool smokeTest)

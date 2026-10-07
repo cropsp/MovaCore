@@ -68,6 +68,90 @@ namespace MovaCore
             "Could not download the speech model: {0}. MovaCore will continue the download next time.",
             "Не вдалося завантажити модель розпізнавання: {0}. MovaCore продовжить завантаження наступного разу."), reason);
 
+        // Hints at the right moment (each at most once a session)
+        public static string HintNothingSelected(string hotkey) => string.Format(T(
+            "Nothing is selected. Select the text typed in the wrong layout, then press {0}.",
+            "Нічого не виділено. Виділіть текст, набраний не в тій розкладці, і натисніть {0}."), hotkey);
+
+        public static string BalloonFirstRun => T(
+            "MovaCore is running: its mouse icon is in the tray, near the clock. Right-click it for the menu.",
+            "MovaCore працює: значок мишки — у треї біля годинника. Меню — правою кнопкою на ньому.");
+
+        public static string RecognitionAdviceText(RecognitionAdvice advice) => advice switch
+        {
+            RecognitionAdvice.FastRecognition => T(
+                "Speech recognition is slow on this computer. Turn on \"Faster recognition of short phrases\" in Settings, Voice.",
+                "Розпізнавання на цьому комп'ютері повільне. Увімкніть «Швидше розпізнавання коротких фраз» у Налаштуваннях, вкладка «Голос»."),
+            RecognitionAdvice.ChooseGpu => T(
+                "Speech recognition runs on the processor and is slow. Choose a graphics card in Settings, Voice: it is many times faster.",
+                "Розпізнавання йде на процесорі й повільне. Виберіть відеокарту в Налаштуваннях, вкладка «Голос»: на ній у рази швидше."),
+            RecognitionAdvice.Restart => T(
+                "Speech recognition still runs on the processor: the graphics card takes over once MovaCore restarts (tray menu: Exit, then start it again).",
+                "Розпізнавання ще йде на процесорі: відеокарта запрацює після перезапуску MovaCore (меню в треї: «Вихід», і запустіть знову)."),
+            RecognitionAdvice.InstallDriver => T(
+                "Speech recognition is slow, and MovaCore sees no graphics card. If the computer has one, install or update its driver (NVIDIA, AMD or Intel).",
+                "Розпізнавання повільне, а відеокарти MovaCore не бачить. Якщо вона є, встановіть або оновіть її драйвер (NVIDIA, AMD чи Intel)."),
+            _ => "",
+        };
+
+        public static string RestartForGpuPrompt => T(
+            "The graphics card takes over speech recognition once MovaCore restarts. Restart now?",
+            "Відеокарта візьметься за розпізнавання після перезапуску MovaCore. Перезапустити зараз?");
+
+        public static string RestartFailed(string reason) => string.Format(T(
+            "Could not restart MovaCore: {0}", "Не вдалося перезапустити MovaCore: {0}"), reason);
+
+        // First steps window
+        public static string MenuFirstSteps => T("First steps…", "Перші кроки…");
+        public static string FirstStepsTitle => T("MovaCore: first steps", "MovaCore: перші кроки");
+        public static string FirstStepsHeading => T("Welcome to MovaCore!", "Вітаємо в MovaCore!");
+
+        public static string FirstStepsIntro => T(
+            "MovaCore works in the background. Its icon, a mouse, is in the tray near the clock: right-click it for the settings.",
+            "MovaCore працює у фоні. Його значок — мишка у треї біля годинника: правою кнопкою на ній відкриваються налаштування.");
+
+        public static string FirstStepsConversionGroup => T("Fix the layout", "Виправлення розкладки");
+
+        public static string FirstStepsConversionText(string hotkey) => string.Format(T(
+            "Typed in the wrong layout? Select the text and press {0}: ghbdsn becomes привіт. Try it here, the word is already selected:",
+            "Набрали текст не в тій розкладці? Виділіть його і натисніть {0}: ghbdsn стане «привіт». Спробуйте тут — слово вже виділено:"), hotkey);
+
+        public static string FirstStepsConversionDone(string hotkey) => string.Format(T(
+            "✓ It works. Press {0} again to change it back.",
+            "✓ Працює. Натисніть {0} ще раз, щоб повернути як було."), hotkey);
+
+        public static string FirstStepsVoiceGroup => T("Voice input", "Голосове введення");
+
+        public static string FirstStepsVoiceText(string size) => string.Format(T(
+            "Hold a key, speak, release: the text appears where the cursor is. Speech is recognized on this computer; the model ({0}) is downloaded once.",
+            "Утримуйте клавішу, говоріть, відпустіть — текст з'явиться там, де курсор. Мовлення розпізнається на цьому комп'ютері; модель ({0}) завантажується один раз."), size);
+
+        public static string FirstStepsVoiceEnable => T("Turn on", "Увімкнути");
+        public static string FirstStepsVoiceOff => T("Off", "Вимкнено");
+
+        // Dictation is off while this window is open (its key may be about to change), so it says when to try it
+        public static string FirstStepsVoiceOn(string hotkey) => string.Format(T(
+            "✓ Ready: close this window, then hold {0} and speak.",
+            "✓ Готово: закрийте це вікно, тоді утримуйте {0} і говоріть."), hotkey);
+
+        public static string FirstStepsVoiceWaitsForModel => T(
+            "On. The model downloads once these steps are closed.",
+            "Увімкнено. Модель почне завантажуватися, коли ви закриєте це вікно.");
+
+        public static string FirstStepsTrayGroup => T("The tray icon", "Значок у треї");
+
+        public static string FirstStepsTrayText => T(
+            "Windows may hide the mouse under the ^ arrow near the clock. To keep it in sight, drag it onto the taskbar, or turn MovaCore on in the taskbar settings.",
+            "Windows може сховати мишку під стрілку ^ біля годинника. Щоб вона була на виду, перетягніть її на панель завдань або ввімкніть MovaCore у параметрах панелі завдань.");
+
+        public static string FirstStepsTraySettings => T("Taskbar settings", "Параметри панелі завдань");
+
+        public static string FirstStepsReopen => T(
+            "These steps open again from the tray menu: First steps.",
+            "Ці кроки можна відкрити знову з меню в треї: «Перші кроки».");
+
+        public static string FirstStepsDone => T("Done", "Готово");
+
         // Dictation: shown in the recording indicator, or in a balloon when the indicator is off
         public static string OverlayNoSpeech => T("No speech heard", "Голосу не чути");
         public static string OverlayNoSignal => T("The microphone is silent — check it in Settings", "Мікрофон мовчить — перевірте його в налаштуваннях");
@@ -154,6 +238,10 @@ namespace MovaCore
         public static string HotkeyGroup => T("Hotkey", "Гаряча клавіша");
         public static string HotkeyChange => T("Change", "Змінити");
         public static string HotkeyPrompt => T("Press a key… (Esc to cancel)", "Натисніть клавішу… (Esc — скасувати)");
+
+        public static string SpeechHotkeyPrompt(string current) => string.Format(T(
+            "Press the key you will hold while dictating… (Esc keeps {0})",
+            "Натисніть клавішу, яку утримуватимете під час диктування… (Esc — лишити {0})"), current);
 
         public static string HotkeyUsedForConversion => T(
             "This key combination already converts the layout.",

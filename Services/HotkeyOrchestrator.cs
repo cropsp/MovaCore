@@ -23,6 +23,9 @@ namespace MovaCore.Services
 
         public event EventHandler<string>? ConversionFailed;
 
+        /// <summary>Raised when the hotkey found nothing selected (and no word before the caret), so nothing changed.</summary>
+        public event EventHandler? NothingSelected;
+
         /// <summary>Put the user's previous clipboard content back after converting (a user setting).</summary>
         public bool RestoreClipboard
         {
@@ -93,10 +96,11 @@ namespace MovaCore.Services
                 if (!await CopyAsync())
                 {
                     // Off by default: if the first copy was merely slow, this would extend the user's selection
-                    if (!ConvertLastWord) return;
-
-                    _hotkeyService.SimulateSelectWordLeft();
-                    if (!await CopyAsync()) return;
+                    if (!ConvertLastWord || !await CopyLastWordAsync())
+                    {
+                        NothingSelected?.Invoke(this, EventArgs.Empty);
+                        return;
+                    }
                 }
                 uint sequenceAfterCopy = _clipboardService.GetSequenceNumber();
 
@@ -176,6 +180,12 @@ namespace MovaCore.Services
 
             steps = new StringInfo(text).LengthInTextElements;
             return steps > 0 && steps <= MaxReselectLength;
+        }
+
+        private async Task<bool> CopyLastWordAsync()
+        {
+            _hotkeyService.SimulateSelectWordLeft();
+            return await CopyAsync();
         }
 
         private async Task<bool> CopyAsync()

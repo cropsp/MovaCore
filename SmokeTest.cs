@@ -79,7 +79,8 @@ namespace MovaCore
                         case 1:
                             // Controls on a tab page are created when the page is first shown
                             for (int i = form!.Tabs.TabCount - 1; i >= 0; i--) form.Tabs.SelectedIndex = i;
-                            CheckSettingsFormSize(form);
+                            CheckFitsScreen(form, "settings form");
+                            CheckFirstSteps(downloads);
                             await CheckConverterAndClipboardAsync(clipboard, converter);
                             break;
                         case 2:
@@ -145,14 +146,25 @@ namespace MovaCore
             }
         }
 
-        // The settings form sizes itself; at 150 % it must still fit a 1080p screen (720 logical pixels high)
-        private static void CheckSettingsFormSize(Form form)
+        // The windows size themselves; at 150 % they must still fit a 1080p screen (720 logical pixels high)
+        private static void CheckFitsScreen(Form form, string name)
         {
             int logicalHeight = form.Height * 96 / form.DeviceDpi;
             int logicalWidth = form.Width * 96 / form.DeviceDpi;
-            AppLog.Info($"Smoke test: settings form is {logicalWidth}x{logicalHeight} at 96 DPI");
+            AppLog.Info($"Smoke test: {name} is {logicalWidth}x{logicalHeight} at 96 DPI");
             if (logicalHeight > 720)
-                AppLog.Error($"Smoke test: the settings form is {logicalHeight} px high and would not fit a 1080p screen at 150 %");
+                AppLog.Error($"Smoke test: the {name} is {logicalHeight} px high and would not fit a 1080p screen at 150 %");
+        }
+
+        // Shown at the first run: it must lay out, and closing it must keep what it suggests (autostart at the first run)
+        private static void CheckFirstSteps(ModelDownloadManager downloads)
+        {
+            using var firstSteps = new FirstStepsForm(new AppSettings(), _ => Task.FromResult<Hotkey?>(null), downloads, firstRun: true);
+            firstSteps.Show();
+            CheckFitsScreen(firstSteps, "first steps window");
+            firstSteps.Close();
+            if (firstSteps.UpdatedSettings is not { LaunchAtStartup: true, SpeechEnabled: false })
+                AppLog.Error("Smoke test: closing the first steps window lost its choices");
         }
 
         // The converter reads the user's installed layouts; check that reading against the real layout files.

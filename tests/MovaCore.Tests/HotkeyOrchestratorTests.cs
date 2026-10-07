@@ -14,6 +14,7 @@ namespace MovaCore.Tests
         private readonly FakeLayoutSwitcher _layouts = new();
         private readonly HotkeyOrchestrator _orchestrator;
         private readonly List<string> _messages = new();
+        private int _nothingSelected;
 
         public HotkeyOrchestratorTests()
         {
@@ -25,6 +26,7 @@ namespace MovaCore.Tests
                 UnobservedPasteDelay = TimeSpan.Zero,
             };
             _orchestrator.ConversionFailed += (_, message) => _messages.Add(message);
+            _orchestrator.NothingSelected += (_, _) => _nothingSelected++;
         }
 
         [Fact]
@@ -36,6 +38,7 @@ namespace MovaCore.Tests
 
             Assert.Equal("привіт", _clipboard.LastSetText);
             Assert.Equal(1, _hotkeys.PasteCalls);
+            Assert.Equal(0, _nothingSelected);
         }
 
         [Fact]
@@ -144,6 +147,7 @@ namespace MovaCore.Tests
             Assert.Equal(0, _clipboard.RestoreCalls);
             Assert.Equal(0, _hotkeys.PasteCalls);
             Assert.Equal(1, _hotkeys.CopyCalls);
+            Assert.Equal(1, _nothingSelected); // the user is told to select the text first
         }
 
         [Fact]
@@ -406,6 +410,7 @@ namespace MovaCore.Tests
             Assert.Equal("привіт", _clipboard.LastSetText);
             Assert.Equal(new[] { 6 }, _hotkeys.SelectLeftCalls);
             Assert.Equal(new[] { KeyboardLanguage.Ukrainian }, _layouts.Switches);
+            Assert.Equal(0, _nothingSelected);
         }
 
         [Fact]
@@ -419,6 +424,7 @@ namespace MovaCore.Tests
             Assert.Equal(1, _hotkeys.CopyCalls);
             Assert.Equal(0, _hotkeys.PasteCalls);
             Assert.Equal(0, _clipboard.SetCalls);
+            Assert.Equal(1, _nothingSelected);
         }
 
         [Fact]
@@ -448,6 +454,7 @@ namespace MovaCore.Tests
             Assert.Equal(0, _hotkeys.PasteCalls);
             Assert.Equal(0, _clipboard.SetCalls);
             Assert.Equal("user clipboard", _clipboard.Text);
+            Assert.Equal(1, _nothingSelected);
         }
 
         [Theory]

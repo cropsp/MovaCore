@@ -76,6 +76,8 @@
     <Compile Include="../../Services/SpeechOutcome.cs" Link="Linked/SpeechOutcome.cs" />
     <Compile Include="../../Services/SpeechStateChangedEventArgs.cs" Link="Linked/SpeechStateChangedEventArgs.cs" />
     <Compile Include="../../Services/SpeechOrchestrator.cs" Link="Linked/SpeechOrchestrator.cs" />
+    <Compile Include="../../Services/RecognitionAdvice.cs" Link="Linked/RecognitionAdvice.cs" />
+    <Compile Include="../../Services/RecognitionAdvisor.cs" Link="Linked/RecognitionAdvisor.cs" />
   </ItemGroup>
 
   <ItemGroup>

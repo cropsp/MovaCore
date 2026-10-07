@@ -16,6 +16,7 @@ namespace MovaCore.UI
         private readonly Func<CancellationToken, Task<Hotkey?>> _captureHotkey;
         private readonly CancellationToken _cancellation;
         private readonly Func<Hotkey, string?> _validate;
+        private bool _capturing;
 
         /// <param name="validate">Returns why a recorded hotkey cannot be used, or null if it can.</param>
         public HotkeyPicker(
@@ -61,10 +62,21 @@ namespace MovaCore.UI
         /// <summary>Raised when recording starts or ends, so the form can disable Save meanwhile.</summary>
         public event EventHandler<bool>? CaptureStateChanged;
 
-        private async void OnChangeClick(object? sender, EventArgs e)
+        /// <summary>Raised when a recorded hotkey becomes the value.</summary>
+        public event EventHandler? ValueChanged;
+
+        private void OnChangeClick(object? sender, EventArgs e) => StartCapture();
+
+        /// <summary>
+        /// Records a new hotkey, as the Change button does, e.g. when the feature it is for is turned on: then with a
+        /// <paramref name="prompt"/> that says what the key is for.
+        /// </summary>
+        public async void StartCapture(string? prompt = null)
         {
+            if (_capturing) return;
+            _capturing = true;
             _button.Enabled = false;
-            _label.Text = Strings.HotkeyPrompt;
+            _label.Text = prompt ?? Strings.HotkeyPrompt;
             CaptureStateChanged?.Invoke(this, true);
 
             Hotkey? captured = null;
@@ -82,6 +94,7 @@ namespace MovaCore.UI
             }
 
             // The form may be gone by now: closing it cancels the recording
+            _capturing = false;
             if (IsDisposed) return;
 
             _label.Text = Value.ToString();
@@ -97,6 +110,7 @@ namespace MovaCore.UI
             }
             Value = hotkey;
             _label.Text = hotkey.ToString();
+            ValueChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 }

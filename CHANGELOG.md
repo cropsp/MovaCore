@@ -24,6 +24,16 @@ All notable changes to MovaCore are documented here. The format follows
   likely one, since there the extra candidates would cost more than they are worth.
 
 ### Added
+- **First steps**, a window for new users that opens at the first start and from the tray menu: where MovaCore lives,
+  the hotkey tried out on a word ("ghbdsn" becomes "привіт"), voice input turned on with a dictation key of your own
+  and its model downloading, how to keep the mouse icon in sight in the tray, and **Launch at Windows startup**
+  (suggested there).
+- Turning voice input on asks for the dictation key right away, in First steps and on the Voice tab: many compact
+  keyboards have no ScrollLock. Esc keeps the key as it is.
+- Hints at the right moment, each once a session: the hotkey pressed with nothing selected says to select the text
+  first; slow speech recognition says what could help (faster recognition of short phrases, the graphics card, its
+  driver, or a restart).
+- Switching from Processor only to a graphics card offers to restart MovaCore, since the card is used only after one.
 - **Graphics card** on the Voice tab replaces "Use the graphics card (Vulkan)": **Automatic**, a card of your choice,
   or **Processor only**. Automatic prefers a separate graphics card to one built into the processor: before, the
   first card Vulkan listed was used, on a laptop often the slower built-in one. Switching between cards takes effect

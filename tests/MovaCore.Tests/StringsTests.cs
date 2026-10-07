@@ -113,6 +113,17 @@ namespace MovaCore.Tests
             Assert.Contains("42", Strings.TrayTooltipDownloading(42));
             Assert.Contains("42", Strings.SpeechModelStillDownloading(42));
             Assert.Contains("the detail", Strings.SpeechErrorText(SpeechError.Failed, "the detail"));
+            Assert.Contains("F10", Strings.HintNothingSelected("F10"));
+            Assert.Contains("F10", Strings.FirstStepsConversionText("F10"));
+            Assert.Contains("F10", Strings.FirstStepsConversionDone("F10"));
+            Assert.Contains("ScrollLock", Strings.FirstStepsVoiceOn("ScrollLock"));
+            Assert.Contains("874", Strings.FirstStepsVoiceText("874 MB"));
+            Assert.Contains("ScrollLock", Strings.SpeechHotkeyPrompt("ScrollLock"));
+            Assert.Contains("the reason", Strings.RestartFailed("the reason"));
+            foreach (RecognitionAdvice advice in Enum.GetValues<RecognitionAdvice>())
+            {
+                if (advice != RecognitionAdvice.None) Assert.NotEmpty(Strings.RecognitionAdviceText(advice));
+            }
 
             string downloading = Strings.SpeechModelDownloading("312 MB", "874 MB", 35);
             Assert.Contains("312 MB", downloading);

@@ -53,7 +53,9 @@ You need Windows 10 or 11. There is nothing to install: no installer, no adminis
    (`win-arm64` for ARM devices).
 2. Extract the whole archive into a folder of your choice, for example `Documents\MovaCore`, and run `MovaCore.exe`.
    Keep the other files next to it.
-3. A mouse icon appears in the system tray. Select some text and press **F10**.
+3. A mouse icon appears in the system tray, and the **First steps** window opens: try the hotkey on a word, turn on
+   voice input with a dictation key of your own, and see how to keep the mouse in sight. Then select some text
+   anywhere and press **F10**.
 
 > [!NOTE]
 > The first time, Windows may say "Windows protected your PC". Choose **More info**, then **Run anyway**. SmartScreen
@@ -61,15 +63,15 @@ You need Windows 10 or 11. There is nothing to install: no installer, no adminis
 > [code signing policy](docs/CODE_SIGNING.md)). Each release lists the SHA-256 checksums of its files in
 > `SHA256SUMS.txt`.
 
-Right-click the tray icon for **Settings**, **Pause**, **About** and **Exit**; double-clicking it opens Settings. To
-start MovaCore with Windows, turn on **Launch at Windows startup** in Settings → General.
+Right-click the tray icon for **Settings**, **Pause**, **First steps**, **About** and **Exit**; double-clicking it opens
+Settings. **Launch at Windows startup** is suggested in First steps, and can be changed in Settings → General.
 
 ## Voice input
 
-1. In Settings → Voice, turn on **Voice input** and press **Save**. MovaCore downloads the speech model (874 MB) in the
-   background, and the tray icon's tooltip shows the progress.
-2. Click where the text should go, **hold the dictation key** (ScrollLock by default), speak, and let go. No
-   ScrollLock on your keyboard? Pick another key under **Dictation hotkey (hold)** on the Voice tab.
+1. In **First steps** press **Turn on**, or in Settings → Voice turn on **Voice input**. MovaCore asks you to press the
+   key you will hold while dictating (Esc keeps ScrollLock, which compact keyboards often lack) and downloads the
+   speech model (874 MB) in the background; the tray icon's tooltip shows the progress. In Settings, press **Save**.
+2. Click where the text should go, **hold the dictation key**, speak, and let go.
 3. The text appears at the cursor, and whatever you had copied is put back on the clipboard.
 
 While you hold the key, the tray icon shows a red dot, and a small indicator at the bottom of the screen shows the
@@ -84,7 +86,8 @@ starting: wait until the grass turns green.
   model file (`ggml-*.bin`; GGUF files are not supported). A downloaded model can be deleted there to free disk space.
 - **Speed.** On x64, a graphics card makes recognition much faster. **Graphics card** on the Voice tab is
   **Automatic** by default, which prefers a separate graphics card to one built into the processor; you can pick a card
-  yourself, or **Processor only** (switching from it to a card takes effect after a restart). On the processor,
+  yourself, or **Processor only** (switching from it to a card takes effect after a restart, which MovaCore offers). If
+  recognition is slow, MovaCore says once what could help. On the processor,
   recognition needs AVX2 (most x64 processors made since 2013).
   **Faster recognition of short phrases** (experimental, on by default) makes Whisper process only as much audio as
   the phrase takes instead of 30 seconds; turn it off if phrases come out worse.
@@ -171,8 +174,8 @@ Windows lets desktop apps use the microphone (Windows Settings → Privacy & sec
 <details>
 <summary>Voice input is slow</summary>
 
-On x64, check that **Graphics card** on the Voice tab is not set to **Processor only** (after changing it, restart
-MovaCore). On a laptop with an NVIDIA or AMD card that is not in the list, install that card's driver. Otherwise, choose
+On x64, check that **Graphics card** on the Voice tab is not set to **Processor only** (after changing it, let MovaCore
+restart). On a laptop with an NVIDIA or AMD card that is not in the list, install that card's driver. Otherwise, choose
 the smaller model. Right after MovaCore starts, loading the model takes a few seconds.
 
 </details>

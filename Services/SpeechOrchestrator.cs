@@ -65,6 +65,12 @@ namespace MovaCore.Services
         /// </summary>
         public event EventHandler? TextPasted;
 
+        /// <summary>
+        /// A phrase took long to recognize (<see cref="IsSlow"/>), on a worker thread: the user may not know that a faster
+        /// setting, the graphics card or its driver would help.
+        /// </summary>
+        public event EventHandler? RecognitionSlow;
+
         public SpeechState State => _state;
 
         /// <summary>
@@ -85,6 +91,14 @@ namespace MovaCore.Services
         internal TimeSpan MaxRecording { get; init; } = TimeSpan.FromMinutes(2);
 
         internal static TimeSpan MinAudioLength { get; } = TimeSpan.FromSeconds(1.25);
+
+        /// <summary>
+        /// Recognition is slow when the text comes over 4 s after the release and later than half as long again as the
+        /// speech took. A phrase recognized about as fast as it was said (a processor with the short audio context) is
+        /// not; the 30-s window on a weak computer (2 s of speech in 16 s) is.
+        /// </summary>
+        internal static bool IsSlow(TimeSpan speech, TimeSpan recognition) =>
+            recognition > TimeSpan.FromSeconds(4) && recognition > speech * 1.5;
 
         /// <summary>
         /// How long the microphone stays open after a dictation: the next one starts at once, with the moment before the
@@ -368,9 +382,12 @@ namespace MovaCore.Services
                     // tell whether Whisper repeated itself.
                     int audioContext = options.FastRecognition ? WhisperAudioContext.For(audio.Length) : WhisperAudioContext.Full;
                     int recognized = string.Join(' ', segments.Select(s => s.Trim()).Where(s => s.Length > 0)).Length;
-                    AppLog.Info($"Dictation: {AudioSamples.Duration(speech.Length).TotalSeconds:0.0} s of speech transcribed in " +
-                        $"{Stopwatch.GetElapsedTime(started).TotalSeconds:0.00} s (audio context {audioContext}), " +
+                    TimeSpan speechDuration = AudioSamples.Duration(speech.Length);
+                    TimeSpan recognition = Stopwatch.GetElapsedTime(started);
+                    AppLog.Info($"Dictation: {speechDuration.TotalSeconds:0.0} s of speech transcribed in " +
+                        $"{recognition.TotalSeconds:0.00} s (audio context {audioContext}), " +
                         $"{segments.Count} part(s), {text.Length} characters of {recognized}");
+                    if (IsSlow(speechDuration, recognition)) RecognitionSlow?.Invoke(this, EventArgs.Empty);
                     Array.Clear(speech);
                     Array.Clear(audio);
 

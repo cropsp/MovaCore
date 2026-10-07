@@ -141,6 +141,18 @@ namespace MovaCore.Services
             });
 
         /// <summary>
+        /// Whether the processor's runtime is loaded. It stays for the process (see <see cref="ChooseRuntime"/>), so a
+        /// graphics card chosen since then works only after a restart.
+        /// </summary>
+        public static bool ProcessorRuntimeLoaded
+        {
+            get
+            {
+                lock (RuntimeLock) return _runtime == RuntimeLibrary.Cpu;
+            }
+        }
+
+        /// <summary>
         /// Chooses and loads the native runtime, as the first dictation would, and describes it (for the smoke test).
         /// </summary>
         public static string LoadRuntime(bool useGpu)
