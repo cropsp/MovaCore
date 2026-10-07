@@ -42,6 +42,21 @@ namespace MovaCore
             ? string.Format(T("MovaCore - downloading the speech model: {0}%", "MovaCore - завантаження моделі: {0}%"), p)
             : T("MovaCore - downloading the speech model", "MovaCore - завантаження моделі");
         public static string MenuSettings => T("Settings…", "Налаштування…");
+        public static string MenuHistory => T("Last phrases", "Останні фрази");
+        public static string MenuHistoryEmpty => T("Nothing dictated yet", "Ще нічого не продиктовано");
+        public static string MenuHistoryClear => T("Clear", "Очистити");
+
+        /// <summary>A phrase in the tray menu: "14:32  Купи хліб і молоко", shortened, and whether it was not pasted.</summary>
+        public static string HistoryEntryLabel(DictationEntry entry)
+        {
+            const int MaxLength = 50;
+            string text = entry.Text.Length <= MaxLength ? entry.Text : entry.Text[..(MaxLength - 1)].TrimEnd() + "…";
+            string label = $"{entry.Time.ToString("HH:mm", CultureInfo.InvariantCulture)}  {text}";
+            return entry.Pasted ? label : label + T(" (not pasted)", " (не вставлено)");
+        }
+
+        public static string BalloonHistoryCopied => T(
+            "Copied: paste it with Ctrl+V.", "Скопійовано: вставте фразу через Ctrl+V.");
         public static string MenuPause => T("Pause", "Пауза");
         public static string MenuAbout => T("About…", "Про програму…");
         public static string MenuExit => T("Exit", "Вихід");
@@ -154,6 +169,8 @@ namespace MovaCore
 
         // Dictation: shown in the recording indicator, or in a balloon when the indicator is off
         public static string OverlayNoSpeech => T("No speech heard", "Голосу не чути");
+        public static string OverlayNotPasted => T(
+            "Not pasted: the text is on the clipboard", "Не вставилося: текст у буфері обміну");
         public static string OverlayNoSignal => T("The microphone is silent — check it in Settings", "Мікрофон мовчить — перевірте його в налаштуваннях");
 
         public static string SpeechModelStillDownloading(int? percent) => percent is int p
@@ -394,9 +411,16 @@ namespace MovaCore
         public static string SpeechUseGpuUnavailable => T("Not available on ARM devices.", "Недоступно на пристроях ARM.");
         public static string SpeechShowOverlay => T("Show the recording indicator", "Показувати індикатор запису");
 
+        public static string SpeechHistoryOnDisk => T(
+            "Remember the last phrases after a restart", "Пам'ятати останні фрази й після перезапуску");
+
+        public static string SpeechHistoryOnDiskTooltip => T(
+            "The last 10 dictated phrases are always in the tray menu, Last phrases, until MovaCore exits. With this on, they are also kept in a file on this computer (%LOCALAPPDATA%\\MovaCore\\history.json); turning it off deletes the file.",
+            "Останні 10 продиктованих фраз завжди є в меню трею «Останні фрази», доки MovaCore працює. Якщо ввімкнути, вони ще й зберігаються у файлі на цьому комп'ютері (%LOCALAPPDATA%\\MovaCore\\history.json); вимкнення видаляє файл.");
+
         public static string SpeechPrivacy => T(
-            "Audio is processed on this computer only: it is never saved or sent anywhere. The internet is used only to download the model from huggingface.co.",
-            "Звук обробляється лише на цьому комп'ютері: він не зберігається й нікуди не надсилається. Інтернет потрібен тільки для завантаження моделі з huggingface.co.");
+            "Audio is processed on this computer only: it is never saved or sent anywhere, and neither is the text. The internet is used only to download the model from huggingface.co.",
+            "Звук обробляється лише на цьому комп'ютері: він не зберігається й нікуди не надсилається, текст теж нікуди не надсилається. Інтернет потрібен тільки для завантаження моделі з huggingface.co.");
 
         /// <summary>A Whisper language code as listed in the settings; language names are in their own language.</summary>
         public static string SpeechLanguageName(string code) => code switch

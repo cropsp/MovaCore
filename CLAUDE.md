@@ -120,7 +120,10 @@ Dictation (hold-to-talk) reuses the hook, the clipboard service and the paste:
   `TranscribeAfterAsync` waits for the one before), so the next phrase is recorded while earlier ones are still
   recognized or pasted, and they paste in order; a press during the trailing audio ends that phrase at once, `Cancel`
   drops the recording and the queue, an earlier phrase's failure is reported when the last one is done, and
-  `TextPasted` comes only for the newest phrase and not while the next is being recorded. It keeps the microphone
+  `TextPasted` comes only for the newest phrase and not while the next is being recorded. Every recognized phrase,
+  pasted or not, goes to `DictationHistory` (the last 10, newest first, for the tray menu's Last phrases, where a
+  click copies one): in memory, and in `%LOCALAPPDATA%\MovaCore\history.json` only with
+  `AppSettings.SpeechHistoryOnDisk` (off by default; turning it off deletes the file); never in the log. It keeps the microphone
   open for 30 s after a dictation (`KeepMicrophoneOpen`), loads the model when
   configured and frees it when dictation is turned off or the model file is gone, enforces a 2-minute limit (a
   release during a UAC prompt is never seen) and reports `StateChanged` (state, outcome, `SpeechError`) on a worker

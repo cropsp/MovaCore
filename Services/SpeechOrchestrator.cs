@@ -24,6 +24,7 @@ namespace MovaCore.Services
         private readonly ISpeechRecognizer _recognizer;
         private readonly ISpeechDetector? _detector;
         private readonly DictationContext? _context;
+        private readonly DictationHistory? _history;
         private readonly TextPaster _paster;
         private readonly Channel<Command> _commands =
             Channel.CreateUnbounded<Command>(new UnboundedChannelOptions { SingleReader = true });
@@ -50,15 +51,17 @@ namespace MovaCore.Services
 
         /// <param name="detector">Voice activity detection; without it, an energy threshold decides what is silence.</param>
         /// <param name="context">The previous dictation, which the next phrase may continue; without it, none does.</param>
+        /// <param name="history">Gets every recognized phrase, pasted or not.</param>
         public SpeechOrchestrator(
             IAudioRecorder recorder, ISpeechRecognizer recognizer, TextPaster paster, ISpeechDetector? detector = null,
-            DictationContext? context = null)
+            DictationContext? context = null, DictationHistory? history = null)
         {
             _recorder = recorder;
             _recognizer = recognizer;
             _paster = paster;
             _detector = detector;
             _context = context;
+            _history = history;
             _loop = Task.Run(RunAsync);
         }
 
@@ -460,6 +463,7 @@ namespace MovaCore.Services
                     else
                     {
                         cancellationToken.ThrowIfCancellationRequested();
+                        string phrase = text;
                         // A phrase that continues the previous dictation gets a space, and no capital mid-sentence
                         text = TranscriptJoiner.Join(_context?.TextBefore(), text);
                         PasteResult result = await _paster.PasteAsync(text, restoreClipboard, () =>
@@ -467,6 +471,8 @@ namespace MovaCore.Services
                             if (generation == _newestPhrase && _state != SpeechState.Recording)
                                 TextPasted?.Invoke(this, EventArgs.Empty);
                         });
+                        // As recognized: that is what the user would paste somewhere else
+                        _history?.Add(phrase, result == PasteResult.Pasted, DateTime.Now);
                         if (result == PasteResult.Pasted)
                             _context?.Remember(text);
                         else

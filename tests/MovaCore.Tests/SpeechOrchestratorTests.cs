@@ -32,14 +32,14 @@ namespace MovaCore.Tests
         private SpeechOrchestrator Create(
             TimeSpan? minRecording = null, TimeSpan? maxRecording = null, string? modelPath = "", ISpeechDetector? detector = null,
             TimeSpan? keepMicrophoneOpen = null, TimeSpan? trailingAudio = null, TimeSpan? noticeableHold = null,
-            DictationContext? context = null)
+            DictationContext? context = null, DictationHistory? history = null)
         {
             var paster = new TextPaster(_hotkeys, _clipboard, new ClipboardGate())
             {
                 PasteTimeout = TimeSpan.FromMilliseconds(100),
                 RestoreDelay = TimeSpan.Zero,
             };
-            var orchestrator = new SpeechOrchestrator(_recorder, _recognizer, paster, detector, context)
+            var orchestrator = new SpeechOrchestrator(_recorder, _recognizer, paster, detector, context, history)
             {
                 MinRecording = minRecording ?? TimeSpan.Zero,
                 MaxRecording = maxRecording ?? TimeSpan.FromMinutes(1),
@@ -55,12 +55,13 @@ namespace MovaCore.Tests
         private void Recreate(
             TimeSpan? minRecording = null, TimeSpan? maxRecording = null, string? modelPath = "", ISpeechDetector? detector = null,
             TimeSpan? keepMicrophoneOpen = null, TimeSpan? trailingAudio = null, TimeSpan? noticeableHold = null,
-            DictationContext? context = null)
+            DictationContext? context = null, DictationHistory? history = null)
         {
             _orchestrator.Dispose();
             _events.Dispose();
             _events = new BlockingCollection<SpeechStateChangedEventArgs>();
-            _orchestrator = Create(minRecording, maxRecording, modelPath, detector, keepMicrophoneOpen, trailingAudio, noticeableHold, context);
+            _orchestrator = Create(
+                minRecording, maxRecording, modelPath, detector, keepMicrophoneOpen, trailingAudio, noticeableHold, context, history);
         }
 
         private static SpeechSettings Settings(string? modelPath) =>
@@ -777,6 +778,24 @@ namespace MovaCore.Tests
 
             Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
             Assert.Equal(new[] { "Я думаю, що", " так буде краще." }, _clipboard.SetTexts);
+        }
+
+        // A phrase that did not get pasted can be copied from the tray menu: it is in the history either way, as recognized
+        [Fact]
+        public void RecognizedPhrases_GoToTheHistory_PastedOrNot()
+        {
+            var history = new DictationHistory(Path.Combine(Path.GetTempPath(), $"movacore-history-{Guid.NewGuid():N}.json"));
+            Recreate(history: history);
+
+            _recognizer.Segments = new[] { " Перша." };
+            Dictate();
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+            _clipboard.PasteObserved = false;
+            _recognizer.Segments = new[] { " Друга." };
+            Dictate();
+            Assert.Equal(SpeechOutcome.NotPasted, NextIdle().Outcome);
+
+            Assert.Equal(new[] { ("Друга.", false), ("Перша.", true) }, history.Entries.Select(entry => (entry.Text, entry.Pasted)));
         }
 
         [Fact]

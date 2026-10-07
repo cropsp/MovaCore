@@ -104,6 +104,7 @@ namespace MovaCore.Tests
             Assert.Null(settings.SpeechGpu);
             Assert.True(settings.SpeechFastRecognition);
             Assert.True(settings.SpeechShowOverlay);
+            Assert.False(settings.SpeechHistoryOnDisk); // the phrases stay in memory unless the user asks
         }
 
         private static AppSettings NonDefaultSettings() => new()
@@ -130,6 +131,7 @@ namespace MovaCore.Tests
             SpeechGpu = "NVIDIA GeForce RTX 4060",
             SpeechFastRecognition = false,
             SpeechShowOverlay = false,
+            SpeechHistoryOnDisk = true,
         };
 
         [Fact]
@@ -163,6 +165,7 @@ namespace MovaCore.Tests
             Assert.Equal("NVIDIA GeForce RTX 4060", restored.SpeechGpu);
             Assert.False(restored.SpeechFastRecognition);
             Assert.False(restored.SpeechShowOverlay);
+            Assert.True(restored.SpeechHistoryOnDisk);
         }
 
         // Guards the round trip above: a property added to AppSettings must get a non-default value there

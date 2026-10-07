@@ -63,8 +63,8 @@ You need Windows 10 or 11. There is nothing to install: no installer, no adminis
 > [code signing policy](docs/CODE_SIGNING.md)). Each release lists the SHA-256 checksums of its files in
 > `SHA256SUMS.txt`.
 
-Right-click the tray icon for **Settings**, **Pause**, **First steps**, **About** and **Exit**; double-clicking it opens
-Settings. **Launch at Windows startup** is suggested in First steps, and can be changed in Settings → General.
+Right-click the tray icon for **Settings**, **Last phrases** (with voice input on), **Pause**, **First steps**, **About**
+and **Exit**; double-clicking it opens Settings. **Launch at Windows startup** is suggested in First steps, and can be changed in Settings → General.
 
 ## Voice input
 
@@ -72,7 +72,10 @@ Settings. **Launch at Windows startup** is suggested in First steps, and can be 
    key you will hold while dictating (Esc keeps ScrollLock, which compact keyboards often lack) and downloads the
    speech model (874 MB) in the background; the tray icon's tooltip shows the progress. In Settings, press **Save**.
 2. Click where the text should go, **hold the dictation key**, speak, and let go.
-3. The text appears at the cursor, and whatever you had copied is put back on the clipboard.
+3. The text appears at the cursor, and whatever you had copied is put back on the clipboard. If it could not be
+   pasted (no text field had the focus), it stays on the clipboard; the last 10 phrases are also in the tray menu,
+   **Last phrases**, where a click copies one again. You can press the key again at once: the next phrase is
+   recorded while the previous one is still being pasted.
 
 While you hold the key, the tray icon shows a red dot, and a small indicator at the bottom of the screen shows the
 mouse in grass that grows with your voice. If the grass is grey and the mouse is dozing, the microphone is still
@@ -118,7 +121,10 @@ starting: wait until the grass turns green.
 
 - MovaCore watches the keyboard only to notice its hotkeys. It does not record or store what you type, and it reads
   the selected text only when you press the hotkey.
-- Speech is recognized on your computer. Audio and recognized text are never saved or sent anywhere.
+- Speech is recognized on your computer. Audio is never saved or sent anywhere, and neither is the recognized text:
+  the last 10 phrases stay in memory for the tray menu's **Last phrases** until MovaCore exits, and go to a file
+  (`%LOCALAPPDATA%\MovaCore\history.json`) only if you turn on **Remember the last phrases after a restart** on the
+  Voice tab. Turning it off deletes the file.
 - There is no telemetry and no account. The only network connection is the speech model download from
   huggingface.co, after you turn voice input on.
 - Settings are stored in `%APPDATA%\MovaCore\settings.json`, downloaded models in `%LOCALAPPDATA%\MovaCore\models`,

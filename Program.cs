@@ -83,12 +83,16 @@ namespace MovaCore
             using var recognizer = new WhisperSpeechRecognizer();
             using var dictationTarget = new WindowsDictationTarget(hotkeys);
             using var dictationContext = new DictationContext(dictationTarget);
+            // Local, not roaming: the phrases stay on this computer
+            var history = new DictationHistory(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MovaCore", "history.json"));
             using var speech = new SpeechOrchestrator(
-                recorder, recognizer, new TextPaster(hotkeys, clipboard, clipboardGate), recognizer, dictationContext);
+                recorder, recognizer, new TextPaster(hotkeys, clipboard, clipboardGate), recognizer, dictationContext, history);
             using var downloader = new ModelDownloader();
             using var downloads = new ModelDownloadManager(downloader, SpeechModelCatalog.DefaultModelsDirectory);
             var settings = new SettingsService(new StartupRegistration());
-            using var context = new TrayApplicationContext(hotkeys, orchestrator, settings, speech, recorder, downloads);
+            using var context = new TrayApplicationContext(
+                hotkeys, orchestrator, settings, speech, recorder, downloads, history, clipboard);
 
             if (!smokeTest && settings.IsFirstRun) context.ShowFirstStepsSoon();
             if (smokeTest)

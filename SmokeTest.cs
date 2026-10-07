@@ -60,6 +60,7 @@ namespace MovaCore
                     {
                         case 0:
                             CheckBuildInfo();
+                            CheckDictationHistory();
                             IReadOnlyList<AudioInputDevice> microphones = recorder.GetInputDevices();
                             // CI runners have no microphone: listing them must work, finding none is fine
                             AppLog.Info($"Smoke test: {microphones.Count} microphone(s) found");
@@ -147,6 +148,28 @@ namespace MovaCore
             {
                 AppLog.Error($"Smoke test: the exe says build {BuildInfo.Number} ({BuildInfo.Commit}), CI runs {runNumber} ({commit})");
             }
+        }
+
+        // Kept on disk only when asked for: the file round-trips through the source-generated JSON, and turning it off
+        // deletes it
+        private static void CheckDictationHistory()
+        {
+            string path = Path.Combine(Path.GetTempPath(), $"movacore-history-{Guid.NewGuid():N}.json");
+            var history = new DictationHistory(path);
+            history.Add("Перша фраза.", pasted: true, DateTime.Now);
+            if (File.Exists(path)) AppLog.Error("Smoke test: the dictation history was written without being asked to");
+            history.SetSaveToDisk(true);
+            history.Add("Друга фраза.", pasted: false, DateTime.Now);
+
+            var restarted = new DictationHistory(path);
+            restarted.SetSaveToDisk(true);
+            IReadOnlyList<DictationEntry> entries = restarted.Entries;
+            if (entries.Count != 2 || entries[0].Text != "Друга фраза." || entries[0].Pasted || !entries[1].Pasted)
+                AppLog.Error($"Smoke test: the dictation history did not survive a restart ({entries.Count} entries)");
+
+            restarted.SetSaveToDisk(false);
+            if (File.Exists(path)) AppLog.Error("Smoke test: turning the dictation history off left its file");
+            AppLog.Info("Smoke test: dictation history checked");
         }
 
         // The windows size themselves; at 150 % they must still fit a 1080p screen (720 logical pixels high)

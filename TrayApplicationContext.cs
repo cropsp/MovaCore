@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
@@ -26,6 +27,8 @@ namespace MovaCore
         private readonly SpeechOrchestrator _speech;
         private readonly IAudioRecorder _recorder;
         private readonly ModelDownloadManager _downloads;
+        private readonly DictationHistory _history;
+        private readonly IClipboardService _clipboard;
         private readonly RecordingOverlay _overlay;
         private readonly SynchronizationContext _uiContext;
         private AppSettings _currentSettings;
@@ -33,6 +36,7 @@ namespace MovaCore
 
         // Created together with the tray menu, after the language is known (see ApplyLanguage)
         private ToolStripMenuItem? _settingsItem;
+        private ToolStripMenuItem? _historyItem;
         private ToolStripMenuItem? _pauseItem;
         private ToolStripMenuItem? _firstStepsItem;
         private ToolStripMenuItem? _aboutItem;
@@ -51,7 +55,9 @@ namespace MovaCore
             SettingsService settingsService,
             SpeechOrchestrator speech,
             IAudioRecorder recorder,
-            ModelDownloadManager downloads)
+            ModelDownloadManager downloads,
+            DictationHistory history,
+            IClipboardService clipboard)
         {
             _hotkeyService = hotkeyService;
             _orchestrator = orchestrator;
@@ -59,6 +65,8 @@ namespace MovaCore
             _speech = speech;
             _recorder = recorder;
             _downloads = downloads;
+            _history = history;
+            _clipboard = clipboard;
 
             // Load and apply settings
             _currentSettings = _settingsService.Load();
@@ -114,6 +122,7 @@ namespace MovaCore
         private void ApplySpeechSettings()
         {
             AppSettings s = _currentSettings;
+            _history.SetSaveToDisk(s.SpeechHistoryOnDisk);
             _hotkeyService.SetSpeechHotkey(s.SpeechEnabled ? s.SpeechHotkey : null);
             _speech.Configure(new SpeechSettings(
                 s.SpeechEnabled,
@@ -155,10 +164,12 @@ namespace MovaCore
         // Does nothing while the tray icon does not exist yet: the constructor applies the language first
         private void UpdateTrayTexts()
         {
-            if (_settingsItem == null || _pauseItem == null || _firstStepsItem == null || _aboutItem == null || _exitItem == null)
+            if (_settingsItem == null || _historyItem == null || _pauseItem == null || _firstStepsItem == null || _aboutItem == null
+                || _exitItem == null)
                 return;
 
             _settingsItem.Text = Strings.MenuSettings;
+            _historyItem.Text = Strings.MenuHistory;
             _pauseItem.Text = Strings.MenuPause;
             _pauseItem.Checked = _paused;
             _firstStepsItem.Text = Strings.MenuFirstSteps;
@@ -269,10 +280,11 @@ namespace MovaCore
                     return;
             }
 
-            // Not pasted (no text field had the focus): the text stays on the clipboard without a word, the user asked
-            // for fewer messages
+            // Not pasted (no text field had the focus): the text stays on the clipboard, and the phrase is in the tray
+            // menu's Last phrases
             string? message = e.Outcome switch
             {
+                SpeechOutcome.NotPasted => Strings.OverlayNotPasted,
                 SpeechOutcome.Failed when e.Error == SpeechError.ModelMissing
                     && _downloads.State.Status == ModelDownloadStatus.Downloading
                     => Strings.SpeechModelStillDownloading(_downloads.State.Percent),
@@ -345,13 +357,20 @@ namespace MovaCore
             var menu = new ContextMenuStrip();
 
             _settingsItem = new ToolStripMenuItem(Strings.MenuSettings, null, (s, e) => ShowSettings());
+            // Filled when it opens; an item is needed for the submenu arrow to show
+            _historyItem = new ToolStripMenuItem(Strings.MenuHistory);
+            _historyItem.DropDownItems.Add(Strings.MenuHistoryEmpty);
+            _historyItem.DropDownOpening += (s, e) => FillHistoryMenu();
             _pauseItem = new ToolStripMenuItem(Strings.MenuPause, null, (s, e) => TogglePause());
             _firstStepsItem = new ToolStripMenuItem(Strings.MenuFirstSteps, null, (s, e) => ShowFirstSteps());
             _aboutItem = new ToolStripMenuItem(Strings.MenuAbout, null, (s, e) => ShowAbout());
             _exitItem = new ToolStripMenuItem(Strings.MenuExit, null, (s, e) => Exit());
 
             menu.Items.Add(_settingsItem);
+            menu.Items.Add(_historyItem);
             menu.Items.Add(_pauseItem);
+            // Only for dictation, or while it still holds phrases
+            menu.Opening += (s, e) => _historyItem.Visible = _currentSettings.SpeechEnabled || _history.Entries.Count > 0;
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(_firstStepsItem);
             menu.Items.Add(_aboutItem);
@@ -359,6 +378,42 @@ namespace MovaCore
             menu.Items.Add(_exitItem);
 
             return menu;
+        }
+
+        private void FillHistoryMenu()
+        {
+            ToolStripItemCollection items = _historyItem!.DropDownItems;
+            var old = new ToolStripItem[items.Count];
+            items.CopyTo(old, 0);
+            items.Clear();
+            foreach (ToolStripItem item in old) item.Dispose();
+            IReadOnlyList<DictationEntry> entries = _history.Entries;
+            foreach (DictationEntry entry in entries)
+            {
+                // "&" would underline the next letter as a menu shortcut
+                items.Add(new ToolStripMenuItem(Strings.HistoryEntryLabel(entry).Replace("&", "&&"), null, (s, e) => CopyFromHistory(entry)));
+            }
+            if (entries.Count == 0) items.Add(new ToolStripMenuItem(Strings.MenuHistoryEmpty) { Enabled = false });
+            items.Add(new ToolStripSeparator());
+            items.Add(new ToolStripMenuItem(Strings.MenuHistoryClear, null, (s, e) => _history.Clear()) { Enabled = entries.Count > 0 });
+        }
+
+        private async void CopyFromHistory(DictationEntry entry)
+        {
+            bool copied;
+            try
+            {
+                copied = await _clipboard.TrySetTextAsync(entry.Text);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Error("Could not copy a phrase from the history", ex);
+                copied = false;
+            }
+            if (!copied)
+                _notifyIcon.ShowBalloonTip(3000, AppName, Strings.BalloonClipboardWriteFailed, ToolTipIcon.Warning);
+            else if (_currentSettings.ShowNotifications)
+                _notifyIcon.ShowBalloonTip(2000, AppName, Strings.BalloonHistoryCopied, ToolTipIcon.Info);
         }
 
         private void OnTrayDoubleClick(object? sender, MouseEventArgs e)

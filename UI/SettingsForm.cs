@@ -62,6 +62,7 @@ namespace MovaCore.UI
         private readonly ComboBox _gpuComboBox = new();
         private readonly CheckBox _fastRecognitionCheckBox = new();
         private readonly CheckBox _overlayCheckBox = new();
+        private readonly CheckBox _historyCheckBox = new();
         private readonly Button _saveButton = new();
         private readonly Button _cancelButton = new();
 
@@ -448,6 +449,8 @@ namespace MovaCore.UI
             ConfigureCheckBox(_fastRecognitionCheckBox, Strings.SpeechFastRecognition, _settings.SpeechFastRecognition);
             _toolTip.SetToolTip(_fastRecognitionCheckBox, Strings.SpeechFastRecognitionTooltip);
             ConfigureCheckBox(_overlayCheckBox, Strings.SpeechShowOverlay, _settings.SpeechShowOverlay);
+            ConfigureCheckBox(_historyCheckBox, Strings.SpeechHistoryOnDisk, _settings.SpeechHistoryOnDisk);
+            _toolTip.SetToolTip(_historyCheckBox, Strings.SpeechHistoryOnDiskTooltip);
 
             return CreateGroup(
                 Strings.SpeechRecognitionGroup,
@@ -455,7 +458,8 @@ namespace MovaCore.UI
                 CreateLabeledRow(new Label { Text = Strings.SpeechMicrophoneLabel }, _microphoneComboBox),
                 CreateLabeledRow(new Label { Text = Strings.SpeechGpuLabel }, _gpuComboBox),
                 _fastRecognitionCheckBox,
-                _overlayCheckBox);
+                _overlayCheckBox,
+                _historyCheckBox);
         }
 
         private Control CreateGeneralGroup()
@@ -579,7 +583,7 @@ namespace MovaCore.UI
             foreach (Control control in new Control[]
             {
                 _speechPicker, _modelComboBox, _customModelRow, _speechLanguageComboBox, _microphoneComboBox,
-                _fastRecognitionCheckBox, _overlayCheckBox,
+                _fastRecognitionCheckBox, _overlayCheckBox, _historyCheckBox,
             })
             {
                 control.Enabled = enabled;
@@ -758,6 +762,7 @@ namespace MovaCore.UI
                 SpeechGpu = _gpuChoices[Math.Max(_gpuComboBox.SelectedIndex, 0)].Name,
                 SpeechFastRecognition = _fastRecognitionCheckBox.Checked,
                 SpeechShowOverlay = _overlayCheckBox.Checked,
+                SpeechHistoryOnDisk = _historyCheckBox.Checked,
             };
         }
 

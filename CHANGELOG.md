@@ -34,6 +34,10 @@ All notable changes to MovaCore are documented here. The format follows
   first; slow speech recognition says what could help (faster recognition of short phrases, the graphics card, its
   driver, or a restart).
 - Switching from Processor only to a graphics card offers to restart MovaCore, since the card is used only after one.
+- **Last phrases** in the tray menu: the last 10 dictated phrases, pasted or not, where a click copies one again.
+  They stay in memory until MovaCore exits; **Remember the last phrases after a restart** on the Voice tab (off by
+  default) keeps them in a file on this computer, and turning it off deletes the file. When a phrase could not be
+  pasted, the indicator now says that the text is on the clipboard.
 - **Graphics card** on the Voice tab replaces "Use the graphics card (Vulkan)": **Automatic**, a card of your choice,
   or **Processor only**. Automatic prefers a separate graphics card to one built into the processor: before, the
   first card Vulkan listed was used, on a laptop often the slower built-in one. Switching between cards takes effect

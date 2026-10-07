@@ -65,6 +65,12 @@ namespace MovaCore.Models
         /// <summary>Show the small recording indicator near the bottom of the screen.</summary>
         public bool SpeechShowOverlay { get; set; } = true;
 
+        /// <summary>
+        /// Keep the last dictated phrases in a file, so that the tray menu offers them after a restart too; off: in memory
+        /// only (see <see cref="Services.DictationHistory"/>).
+        /// </summary>
+        public bool SpeechHistoryOnDisk { get; set; } = false;
+
         /// <summary>A copy that can be changed without touching this one.</summary>
         public AppSettings Clone()
         {

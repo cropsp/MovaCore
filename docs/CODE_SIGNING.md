@@ -34,6 +34,8 @@ or the person installing or operating it.
   [huggingface.co](https://huggingface.co/ggerganov/whisper.cpp), after the user turns voice input on (or resumes an
   interrupted download of it). Only the model file is requested; nothing about the user, their computer or their
   speech is sent.
-- Speech is recognized on the user's computer. Audio and recognized text are never saved or sent anywhere.
+- Speech is recognized on the user's computer. Audio is never saved or sent anywhere, and recognized text is never
+  sent anywhere: the last 10 phrases stay in memory for the tray menu, and are written to a file on the computer
+  (`%LOCALAPPDATA%\MovaCore\history.json`) only while the user has turned that on; turning it off deletes the file.
 - There is no telemetry. The diagnostic log in `%LOCALAPPDATA%\MovaCore\logs` stays on the computer and never contains
   the converted text, keystrokes or what was said.
