@@ -229,9 +229,21 @@ namespace MovaCore.UI
                 Text = "MovaCore " + Strings.FormatVersion(typeof(SettingsForm).Assembly.GetName().Version),
                 Font = _titleFont,
                 AutoSize = true,
-                Anchor = AnchorStyles.Left,
                 Margin = Padding.Empty,
             };
+            // Testers run many builds of one version: which one this is
+            var build = new Label
+            {
+                Text = Strings.BuildLabel(BuildInfo.Number, BuildInfo.Commit, BuildInfo.Date, BuildInfo.Release),
+                AutoSize = true,
+                ForeColor = SystemColors.GrayText,
+                Margin = new Padding(0, 2, 0, 0),
+            };
+            TableLayoutPanel titles = CreatePanel(new ColumnStyle(SizeType.AutoSize));
+            titles.Dock = DockStyle.None;
+            titles.Anchor = AnchorStyles.Left;
+            AddRow(titles, title);
+            AddRow(titles, build);
 
             TableLayoutPanel header = CreatePanel(new ColumnStyle(SizeType.AutoSize), new ColumnStyle(SizeType.AutoSize));
             header.Dock = DockStyle.None;
@@ -240,7 +252,7 @@ namespace MovaCore.UI
             header.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             header.RowCount = 1;
             header.Controls.Add(_logoBox, 0, 0);
-            header.Controls.Add(title, 1, 0);
+            header.Controls.Add(titles, 1, 0);
             return header;
         }
 

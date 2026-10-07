@@ -23,8 +23,11 @@ namespace MovaCore
 
             AppLog.Initialize(Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MovaCore", "logs"));
-            AppLog.Info($"MovaCore {typeof(Program).Assembly.GetName().Version} starting on " +
-                $"{RuntimeInformation.OSDescription} ({RuntimeInformation.ProcessArchitecture})" +
+            // Testers run many builds of one version: the log says which one wrote it
+            string build = BuildInfo.Number.Length == 0 ? "local build"
+                : $"{(BuildInfo.Release ? "build" : "test build")} {BuildInfo.Number}, {BuildInfo.Commit}";
+            AppLog.Info($"MovaCore {Strings.FormatVersion(typeof(Program).Assembly.GetName().Version)} ({build}, " +
+                $"{BuildInfo.Date}) starting on {RuntimeInformation.OSDescription} ({RuntimeInformation.ProcessArchitecture})" +
                 (smokeTest ? ", smoke test" : ""));
             RegisterExceptionHandlers(smokeTest);
 

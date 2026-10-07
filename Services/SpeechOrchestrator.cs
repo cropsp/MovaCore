@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -363,10 +364,10 @@ namespace MovaCore.Services
                     string text = TranscriptText.Clean(segments);
 
                     // Never log the text itself: it is what the user said. The parts and the characters before cleaning
+                    // (joined with a space, as Clean joins them, so that the two counts match when nothing was dropped)
                     // tell whether Whisper repeated itself.
                     int audioContext = options.FastRecognition ? WhisperAudioContext.For(audio.Length) : WhisperAudioContext.Full;
-                    int recognized = 0;
-                    foreach (string segment in segments) recognized += segment.Trim().Length;
+                    int recognized = string.Join(' ', segments.Select(s => s.Trim()).Where(s => s.Length > 0)).Length;
                     AppLog.Info($"Dictation: {AudioSamples.Duration(speech.Length).TotalSeconds:0.0} s of speech transcribed in " +
                         $"{Stopwatch.GetElapsedTime(started).TotalSeconds:0.00} s (audio context {audioContext}), " +
                         $"{segments.Count} part(s), {text.Length} characters of {recognized}");

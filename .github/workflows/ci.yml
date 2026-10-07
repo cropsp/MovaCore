@@ -212,9 +212,10 @@ jobs:
           $missing = $required | Where-Object { -not (Test-Path "out/${{ matrix.rid }}/$_") }
           if ($missing) { throw "Missing from the publish output: $($missing -join ', ')" }
 
+      # The run number is the build number the app shows (MovaCore.csproj), so downloaded test builds are told apart
       - uses: actions/upload-artifact@v6
         with:
-          name: MovaCore-${{ matrix.rid }}
+          name: MovaCore-${{ matrix.rid }}-build${{ github.run_number }}
           path: |
             out/${{ matrix.rid }}/MovaCore.exe
             out/${{ matrix.rid }}/uiohook.dll
@@ -279,8 +280,9 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME}"
           for rid in win-x64 win-arm64; do
-            cp LICENSE THIRD-PARTY-NOTICES.txt "artifacts/MovaCore-$rid/"
-            (cd "artifacts/MovaCore-$rid" && zip -9 -r "../../MovaCore-$tag-$rid.zip" .)
+            files="artifacts/MovaCore-$rid-build$GITHUB_RUN_NUMBER"
+            cp LICENSE THIRD-PARTY-NOTICES.txt "$files/"
+            (cd "$files" && zip -9 -r "../../MovaCore-$tag-$rid.zip" .)
           done
           sha256sum MovaCore-*.zip > SHA256SUMS.txt
           cat SHA256SUMS.txt

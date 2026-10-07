@@ -44,7 +44,12 @@ CI (`.github/workflows/ci.yml`, Windows runners) is the only place the real app 
 arm64) and smoke-tested; its job summary lists the publish output sizes and the AOT/trim warnings (all currently from
 WinForms itself). After publishing, `eng/copy-vc-runtime.ps1` copies the VC++ runtime next to the Whisper DLLs and
 `eng/check-native-deps.ps1` fails if any shipped binary imports a DLL a clean PC may lack (`publish.ps1` runs both
-too). The smoke test transcribes a synthesized "hello world" with the cached `ggml-tiny.bin`. Pushing a `v*` tag creates a draft release with zip archives and SHA256 sums; the tag must match
+too). The smoke test transcribes a synthesized "hello world" with the cached `ggml-tiny.bin`. Every build says which
+it is: the `WriteBuildInfo` target in `MovaCore.csproj` writes `BuildInfo` (generated `obj/.../BuildInfo.g.cs`: CI's
+run number `GITHUB_RUN_NUMBER`, the commit, the date, whether a tag is built; empty number and commit locally), shown
+by `Strings.BuildLabel` in the settings header and About and in the log's first line; the run number is also the file
+version's fourth part and in the artifact names (`MovaCore-win-x64-build57`), and the smoke test checks it against CI's
+variables. Pushing a `v*` tag creates a draft release with zip archives and SHA256 sums; the tag must match
 `<Version>` in `MovaCore.csproj`, and the notes come from that version's `CHANGELOG.md` section
 (`docs/RELEASING.md`). For tags, CI sends `MovaCore.exe` (only our own file) to SignPath Foundation for signing once
 the repository variable `SIGNPATH_ORGANIZATION_ID` is set, and skips that until then (`docs/CODE_SIGNING.md`, whose

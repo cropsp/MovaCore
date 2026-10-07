@@ -30,6 +30,9 @@ All notable changes to MovaCore are documented here. The format follows
   at once; from Processor only to a card, after a restart.
 - The log names the graphics card that speech recognition runs on and how much memory it uses, to help find out why
   recognition is slow on a given computer.
+- The build number under the version, at the top of the settings window and in About (for example "Build 57 ·
+  265ab8d · 2026-10-07"), and in the first line of the log, so that builds of one version can be told apart. It is
+  also the last part of the file version in the file's properties. Builds between releases say "Test build".
 
 ### Fixed
 - A dictated phrase was sometimes pasted twice, or followed by its own beginning: when Whisper hears silence after the

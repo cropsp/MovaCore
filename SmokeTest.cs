@@ -58,6 +58,7 @@ namespace MovaCore
                     switch (step++)
                     {
                         case 0:
+                            CheckBuildInfo();
                             IReadOnlyList<AudioInputDevice> microphones = recorder.GetInputDevices();
                             // CI runners have no microphone: listing them must work, finding none is fine
                             AppLog.Info($"Smoke test: {microphones.Count} microphone(s) found");
@@ -128,6 +129,20 @@ namespace MovaCore
                 timer.Start();
             };
             timer.Start();
+        }
+
+        // In CI the exe must carry the run's number and commit (MovaCore.csproj writes them into BuildInfo)
+        private static void CheckBuildInfo()
+        {
+            AppLog.Info($"Smoke test: {Strings.BuildLabel(BuildInfo.Number, BuildInfo.Commit, BuildInfo.Date, BuildInfo.Release)}");
+            string? runNumber = Environment.GetEnvironmentVariable("GITHUB_RUN_NUMBER");
+            if (runNumber == null) return; // run by hand
+            string? commit = Environment.GetEnvironmentVariable("GITHUB_SHA");
+            if (BuildInfo.Number != runNumber || BuildInfo.Commit.Length == 0
+                || commit?.StartsWith(BuildInfo.Commit, StringComparison.Ordinal) != true)
+            {
+                AppLog.Error($"Smoke test: the exe says build {BuildInfo.Number} ({BuildInfo.Commit}), CI runs {runNumber} ({commit})");
+            }
         }
 
         // The settings form sizes itself; at 150 % it must still fit a 1080p screen (720 logical pixels high)

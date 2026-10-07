@@ -104,7 +104,8 @@ namespace MovaCore.Tests
             Assert.Contains("the reason", Strings.BalloonHookFailed("the reason"));
             Assert.Contains("the reason", Strings.BalloonUnexpectedError("the reason"));
             Assert.Contains("the reason", Strings.SettingsNotSaved("the reason"));
-            Assert.Contains("1.2.3", Strings.AboutText("1.2.3"));
+            Assert.Contains("1.2.3", Strings.AboutText("1.2.3", "the build"));
+            Assert.Contains("the build", Strings.AboutText("1.2.3", "the build"));
             Assert.Contains("ScrollLock", Strings.BalloonModelReady("ScrollLock"));
             Assert.Contains("the reason", Strings.BalloonModelDownloadFailed("the reason"));
             Assert.Contains("the reason", Strings.SpeechModelDownloadFailed("the reason"));
@@ -193,6 +194,21 @@ namespace MovaCore.Tests
 
             var gpu = new GpuDevice(0, "NVIDIA GeForce RTX 4060", discrete, (ulong)(gibibytes * (1UL << 30)));
             Assert.Equal(expected, Strings.SpeechGpuName(gpu));
+        }
+
+        [Fact]
+        public void BuildLabel_TellsTestBuildsFromReleasesAndLocalBuilds()
+        {
+            Strings.Language = UiLanguage.English;
+
+            Assert.Equal("Test build 57 · 265ab8d · 2026-10-07", Strings.BuildLabel("57", "265ab8d", "2026-10-07", release: false));
+            Assert.Equal("Build 57 · 265ab8d · 2026-10-07", Strings.BuildLabel("57", "265ab8d", "2026-10-07", release: true));
+            Assert.Equal("Build 57 · 2026-10-07", Strings.BuildLabel("57", "", "2026-10-07", release: true));
+            Assert.Equal("Local build · 2026-10-07", Strings.BuildLabel("", "", "2026-10-07", release: false));
+
+            Strings.Language = UiLanguage.Ukrainian;
+            Assert.Equal("Тестова збірка 57 · 265ab8d · 2026-10-07", Strings.BuildLabel("57", "265ab8d", "2026-10-07", release: false));
+            Assert.Equal("Локальна збірка · 2026-10-07", Strings.BuildLabel("", "", "2026-10-07", release: false));
         }
 
         [Fact]

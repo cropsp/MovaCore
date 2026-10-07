@@ -59,6 +59,45 @@
     <EmbeddedResource Include="Resources\logo.png" LogicalName="MovaCore.logo.png" />
   </ItemGroup>
 
+  <!-- Which build this is, since testers run many builds of one version: CI passes its run number, commit and whether
+       it builds a release tag (variables GitHub Actions sets); a local build has none of them. BuildInfo.g.cs carries
+       them as constants (no reflection to survive AOT) for the settings header, About and the log's first line, and the
+       run number is the file version's fourth part (Explorer: Properties, Details). -->
+  <PropertyGroup>
+    <MovaCoreBuildNumber>$(GITHUB_RUN_NUMBER)</MovaCoreBuildNumber>
+    <MovaCoreBuildCommit Condition="'$(GITHUB_SHA)' != ''">$(GITHUB_SHA.Substring(0, 7))</MovaCoreBuildCommit>
+    <MovaCoreReleaseBuild>false</MovaCoreReleaseBuild>
+    <MovaCoreReleaseBuild Condition="'$(GITHUB_REF_TYPE)' == 'tag'">true</MovaCoreReleaseBuild>
+    <FileVersion Condition="'$(MovaCoreBuildNumber)' != ''">$(Version).$(MovaCoreBuildNumber)</FileVersion>
+  </PropertyGroup>
+
+  <Target Name="WriteBuildInfo" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <_BuildInfoPath>$(IntermediateOutputPath)BuildInfo.g.cs</_BuildInfoPath>
+      <_BuildInfoText>
+// &lt;auto-generated/&gt; by the WriteBuildInfo target in MovaCore.csproj
+namespace MovaCore
+{
+    /// &lt;summary&gt;Which build this is: CI's run number and commit, both empty for a local build.&lt;/summary&gt;
+    internal static class BuildInfo
+    {
+        public static string Number =&gt; "$(MovaCoreBuildNumber)";
+        public static string Commit =&gt; "$(MovaCoreBuildCommit)";
+        public static string Date =&gt; "$([System.DateTime]::UtcNow.ToString('yyyy-MM-dd'))";
+        public static bool Release =&gt; $(MovaCoreReleaseBuild);
+    }
+}
+      </_BuildInfoText>
+    </PropertyGroup>
+    <!-- Escaped, or the semicolons would split the text into separate lines -->
+    <WriteLinesToFile File="$(_BuildInfoPath)" Lines="$([MSBuild]::Escape($(_BuildInfoText.Trim())))" Overwrite="true"
+                      WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(_BuildInfoPath)" />
+      <FileWrites Include="$(_BuildInfoPath)" />
+    </ItemGroup>
+  </Target>
+
   <!-- The Whisper.net runtime packages copy their native files for every architecture (and Vulkan's for Linux too),
        whatever the RuntimeIdentifier is: keep only the published architecture's. -->
   <Target Name="RemoveForeignWhisperRuntimes" AfterTargets="Publish" Condition="'$(RuntimeIdentifier)' != ''">

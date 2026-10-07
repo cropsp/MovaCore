@@ -21,6 +21,17 @@ namespace MovaCore
         public static string FormatVersion(Version? version) =>
             version == null ? "0.0.0" : $"{version.Major}.{version.Minor}.{Math.Max(version.Build, 0)}";
 
+        /// <summary>
+        /// The line under the version, telling builds of one version apart: the CI run that built it (a local build has
+        /// none), its commit and date, e.g. "Test build 57 · 265ab8d · 2026-10-07". Only a release tag's build is not a test build.
+        /// </summary>
+        public static string BuildLabel(string number, string commit, string date, bool release)
+        {
+            if (number.Length == 0) return T("Local build", "Локальна збірка") + " · " + date;
+            string kind = release ? T("Build", "Збірка") : T("Test build", "Тестова збірка");
+            return commit.Length == 0 ? $"{kind} {number} · {date}" : $"{kind} {number} · {commit} · {date}";
+        }
+
         // Tray icon and menu
         public static string TrayTooltip => T("MovaCore - layout converter", "MovaCore - конвертер розкладки");
         public static string TrayTooltipPaused => T("MovaCore - paused", "MovaCore - на паузі");
@@ -114,9 +125,9 @@ namespace MovaCore
             "The settings are applied but could not be saved: {0}",
             "Налаштування застосовано, але не вдалося зберегти: {0}"), reason);
 
-        public static string AboutText(string version) => string.Format(T(
-            "MovaCore {0}\n\nFast keyboard layout converter for Windows: fixes text typed in the wrong layout (EN ↔ UA).\n\nMIT license.",
-            "MovaCore {0}\n\nШвидкий конвертер розкладки клавіатури для Windows: виправляє текст, набраний не в тій розкладці (EN ↔ UA).\n\nЛіцензія MIT."), version);
+        public static string AboutText(string version, string build) => string.Format(T(
+            "MovaCore {0}\n{1}\n\nFast keyboard layout converter for Windows: fixes text typed in the wrong layout (EN ↔ UA).\n\nMIT license.",
+            "MovaCore {0}\n{1}\n\nШвидкий конвертер розкладки клавіатури для Windows: виправляє текст, набраний не в тій розкладці (EN ↔ UA).\n\nЛіцензія MIT."), version, build);
 
         // Startup and crash messages (Program.cs), shown before the settings are loaded
         public static string AlreadyRunning => T(
