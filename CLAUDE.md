@@ -46,7 +46,7 @@ WinForms itself). After publishing, `eng/copy-vc-runtime.ps1` copies the VC++ ru
 `eng/check-native-deps.ps1` fails if any shipped binary imports a DLL a clean PC may lack (`publish.ps1` runs both
 too). The smoke test transcribes a synthesized "hello world" with the cached `ggml-tiny.bin`. Every build says which
 it is: the `WriteBuildInfo` target in `MovaCore.csproj` writes `BuildInfo` (generated `obj/.../BuildInfo.g.cs`: CI's
-run number `GITHUB_RUN_NUMBER`, the commit, the date, whether a tag is built; empty number and commit locally), shown
+run number `GITHUB_RUN_NUMBER`, the commit and the date; empty number and commit locally), shown
 by `Strings.BuildLabel` in the settings header and About and in the log's first line; the run number is also the file
 version's fourth part and in the artifact names (`MovaCore-win-x64-build57`), and the smoke test checks it against CI's
 variables. Pushing a `v*` tag creates a draft release with zip archives and SHA256 sums; the tag must match
@@ -116,7 +116,12 @@ Dictation (hold-to-talk) reuses the hook, the clipboard service and the paste:
   hesitations, 3+ repeated words and parts that start over; the log gives the parts and characters, never the text), then **`TextPaster`** (snapshot, set, Ctrl+V, wait for the read, restore; a
   read before the paste, e.g. by a clipboard manager, hides the paste itself, so it then restores after a pause; it
   waits for the `ClipboardGate` instead of dropping the text). `NoSpeech`/`NoSignal` are reported only after a hold
-  of ≥ 1 s. It keeps the microphone open for 30 s after a dictation (`KeepMicrophoneOpen`), loads the model when
+  of ≥ 1 s. A press is taken at any time: a released recording becomes a phrase in a queue (`_phrases`,
+  `TranscribeAfterAsync` waits for the one before), so the next phrase is recorded while earlier ones are still
+  recognized or pasted, and they paste in order; a press during the trailing audio ends that phrase at once, `Cancel`
+  drops the recording and the queue, an earlier phrase's failure is reported when the last one is done, and
+  `TextPasted` comes only for the newest phrase and not while the next is being recorded. It keeps the microphone
+  open for 30 s after a dictation (`KeepMicrophoneOpen`), loads the model when
   configured and frees it when dictation is turned off or the model file is gone, enforces a 2-minute limit (a
   release during a UAC prompt is never seen) and reports `StateChanged` (state, outcome, `SpeechError`) on a worker
   thread. Before pasting, `TranscriptJoiner` fits the phrase to `DictationContext`: the last dictated text, valid

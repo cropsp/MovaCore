@@ -23,13 +23,13 @@ namespace MovaCore
 
         /// <summary>
         /// The line under the version, telling builds of one version apart: the CI run that built it (a local build has
-        /// none), its commit and date, e.g. "Test build 57 · 265ab8d · 2026-10-07". Only a release tag's build is not a test build.
+        /// none), its commit and date, e.g. "Build 57 · 265ab8d · 2026-10-07".
         /// </summary>
-        public static string BuildLabel(string number, string commit, string date, bool release)
+        public static string BuildLabel(string number, string commit, string date)
         {
             if (number.Length == 0) return T("Local build", "Локальна збірка") + " · " + date;
-            string kind = release ? T("Build", "Збірка") : T("Test build", "Тестова збірка");
-            return commit.Length == 0 ? $"{kind} {number} · {date}" : $"{kind} {number} · {commit} · {date}";
+            string build = T("Build", "Збірка");
+            return commit.Length == 0 ? $"{build} {number} · {date}" : $"{build} {number} · {commit} · {date}";
         }
 
         // Tray icon and menu

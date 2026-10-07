@@ -534,7 +534,7 @@ namespace MovaCore
         {
             string version = Strings.FormatVersion(typeof(TrayApplicationContext).Assembly.GetName().Version);
             DialogResult answer = MessageBox.Show(
-                Strings.AboutText(version, Strings.BuildLabel(BuildInfo.Number, BuildInfo.Commit, BuildInfo.Date, BuildInfo.Release))
+                Strings.AboutText(version, Strings.BuildLabel(BuildInfo.Number, BuildInfo.Commit, BuildInfo.Date))
                     + "\n\n" + Strings.AboutOpenReleasesPrompt,
                 AppName,
                 MessageBoxButtons.YesNo,

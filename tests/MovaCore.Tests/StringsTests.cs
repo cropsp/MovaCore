@@ -208,18 +208,17 @@ namespace MovaCore.Tests
         }
 
         [Fact]
-        public void BuildLabel_TellsTestBuildsFromReleasesAndLocalBuilds()
+        public void BuildLabel_NamesTheCiBuildOrALocalOne()
         {
             Strings.Language = UiLanguage.English;
 
-            Assert.Equal("Test build 57 · 265ab8d · 2026-10-07", Strings.BuildLabel("57", "265ab8d", "2026-10-07", release: false));
-            Assert.Equal("Build 57 · 265ab8d · 2026-10-07", Strings.BuildLabel("57", "265ab8d", "2026-10-07", release: true));
-            Assert.Equal("Build 57 · 2026-10-07", Strings.BuildLabel("57", "", "2026-10-07", release: true));
-            Assert.Equal("Local build · 2026-10-07", Strings.BuildLabel("", "", "2026-10-07", release: false));
+            Assert.Equal("Build 57 · 265ab8d · 2026-10-07", Strings.BuildLabel("57", "265ab8d", "2026-10-07"));
+            Assert.Equal("Build 57 · 2026-10-07", Strings.BuildLabel("57", "", "2026-10-07"));
+            Assert.Equal("Local build · 2026-10-07", Strings.BuildLabel("", "", "2026-10-07"));
 
             Strings.Language = UiLanguage.Ukrainian;
-            Assert.Equal("Тестова збірка 57 · 265ab8d · 2026-10-07", Strings.BuildLabel("57", "265ab8d", "2026-10-07", release: false));
-            Assert.Equal("Локальна збірка · 2026-10-07", Strings.BuildLabel("", "", "2026-10-07", release: false));
+            Assert.Equal("Збірка 57 · 265ab8d · 2026-10-07", Strings.BuildLabel("57", "265ab8d", "2026-10-07"));
+            Assert.Equal("Локальна збірка · 2026-10-07", Strings.BuildLabel("", "", "2026-10-07"));
         }
 
         [Fact]

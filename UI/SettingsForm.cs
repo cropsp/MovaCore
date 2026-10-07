@@ -232,7 +232,7 @@ namespace MovaCore.UI
             // Testers run many builds of one version: which one this is
             var build = new Label
             {
-                Text = Strings.BuildLabel(BuildInfo.Number, BuildInfo.Commit, BuildInfo.Date, BuildInfo.Release),
+                Text = Strings.BuildLabel(BuildInfo.Number, BuildInfo.Commit, BuildInfo.Date),
                 AutoSize = true,
                 ForeColor = SystemColors.GrayText,
                 Margin = new Padding(0, 2, 0, 0),

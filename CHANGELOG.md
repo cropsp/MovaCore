@@ -42,9 +42,12 @@ All notable changes to MovaCore are documented here. The format follows
   recognition is slow on a given computer.
 - The build number under the version, at the top of the settings window and in About (for example "Build 57 ·
   265ab8d · 2026-10-07"), and in the first line of the log, so that builds of one version can be told apart. It is
-  also the last part of the file version in the file's properties. Builds between releases say "Test build".
+  also the last part of the file version in the file's properties.
 
 ### Fixed
+- Pressing the dictation key again right after a phrase was ignored while that phrase was still being recognized or
+  pasted, which the indicator no longer showed: what was said next was lost. The next phrase is now recorded at once,
+  and the phrases are pasted one after another, in order.
 - A dictated phrase was sometimes pasted twice, or followed by its own beginning: when Whisper hears silence after the
   phrase, it can start over and recognize the phrase again. Such a repeat is now dropped. It happened with the
   30-second window of 1.2.0 too, more often with the short one.

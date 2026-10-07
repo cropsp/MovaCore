@@ -68,6 +68,9 @@ namespace MovaCore.Tests
     public class FakeSpeechRecognizer : ISpeechRecognizer
     {
         public string[] Segments { get; set; } = { " Привіт, світе." };
+
+        /// <summary>When set, the segments of each call by its number (from 0), instead of <see cref="Segments"/>.</summary>
+        public Func<int, string[]>? SegmentsFor { get; set; }
         public Exception? Error { get; set; }
         public Exception? PreloadError { get; set; }
 
@@ -89,11 +92,16 @@ namespace MovaCore.Tests
 
         public async Task<IReadOnlyList<string>> TranscribeAsync(float[] samples, SpeechOptions options, CancellationToken cancellationToken)
         {
-            lock (Transcriptions) Transcriptions.Add(options);
+            int call;
+            lock (Transcriptions)
+            {
+                call = Transcriptions.Count;
+                Transcriptions.Add(options);
+            }
             SampleCount = samples.Length;
             if (Gate != null) await Gate.Task.WaitAsync(cancellationToken);
             if (Error != null) throw Error;
-            return Segments;
+            return SegmentsFor?.Invoke(call) ?? Segments;
         }
 
         public Task UnloadAsync()

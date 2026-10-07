@@ -138,7 +138,7 @@ namespace MovaCore
         // In CI the exe must carry the run's number and commit (MovaCore.csproj writes them into BuildInfo)
         private static void CheckBuildInfo()
         {
-            AppLog.Info($"Smoke test: {Strings.BuildLabel(BuildInfo.Number, BuildInfo.Commit, BuildInfo.Date, BuildInfo.Release)}");
+            AppLog.Info($"Smoke test: {Strings.BuildLabel(BuildInfo.Number, BuildInfo.Commit, BuildInfo.Date)}");
             string? runNumber = Environment.GetEnvironmentVariable("GITHUB_RUN_NUMBER");
             if (runNumber == null) return; // run by hand
             string? commit = Environment.GetEnvironmentVariable("GITHUB_SHA");

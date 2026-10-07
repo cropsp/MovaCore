@@ -72,6 +72,15 @@ namespace MovaCore.Tests
             return change!;
         }
 
+        private SpeechStateChangedEventArgs NextIdleOr(SpeechState state)
+        {
+            while (true)
+            {
+                SpeechStateChangedEventArgs change = Next();
+                if (change.State == SpeechState.Idle || change.State == state) return change;
+            }
+        }
+
         private SpeechStateChangedEventArgs NextIdle()
         {
             while (true)
@@ -311,25 +320,82 @@ namespace MovaCore.Tests
             Assert.Equal(0, _hotkeys.PasteCalls);
         }
 
+        // People press again without looking whether the previous text is in: the next phrase is recorded meanwhile,
+        // and both are pasted in the order they were said
         [Fact]
-        public void PressDuringTranscription_IsIgnoredWithItsRelease()
+        public void PressDuringTranscription_RecordsTheNextPhrase()
         {
             _recognizer.Gate = new TaskCompletionSource();
+            _recognizer.SegmentsFor = call => new[] { call == 0 ? " Перша." : " Друга." };
             Dictate();
             Assert.Equal(SpeechState.Recording, Next().State);
             Assert.Equal(SpeechState.Transcribing, Next().State);
 
             Dictate();
-            Assert.False(_events.TryTake(out _, 200));
+            Assert.Equal(SpeechState.Recording, Next().State);
+            Assert.Equal(SpeechState.Transcribing, Next().State);
             _recognizer.Gate.SetResult();
 
             Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
-            Assert.Single(_recognizer.Transcriptions);
-            Assert.Single(_recorder.StartedDevices);
+            Assert.False(_events.TryTake(out _, 200)); // idle once, after both
+            Assert.Equal(2, _recognizer.Transcriptions.Count);
+            Assert.Equal(2, _recorder.StartedDevices.Count);
+            Assert.Equal(new[] { "Перша.", "Друга." }, _clipboard.SetTexts);
+            Assert.Equal(2, _hotkeys.PasteCalls);
+        }
 
-            _recognizer.Gate = null;
+        // The indicator stays while the next phrase is recorded: the earlier phrase's paste does not hide it
+        [Fact]
+        public void EarlierPhrasePasted_WhileTheNextIsRecorded_DoesNotHideTheIndicator()
+        {
+            int pasted = 0;
+            _orchestrator.TextPasted += (_, _) => Interlocked.Increment(ref pasted);
+            _recognizer.Gate = new TaskCompletionSource();
             Dictate();
+            Assert.Equal(SpeechState.Transcribing, NextIdleOr(SpeechState.Transcribing).State);
+
+            _orchestrator.OnHotkeyPressed();
+            Assert.Equal(SpeechState.Recording, Next().State);
+            _recognizer.Gate.SetResult();
+            Assert.True(SpinWait.SpinUntil(() => _hotkeys.PasteCalls == 1, WaitLimit));
+            Assert.Equal(0, Volatile.Read(ref pasted));
+
+            _orchestrator.OnHotkeyReleased();
             Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+            Assert.Equal(1, Volatile.Read(ref pasted));
+        }
+
+        [Fact]
+        public void CancelWithPhrasesWaiting_PastesNoneOfThem()
+        {
+            _recognizer.Gate = new TaskCompletionSource();
+            Dictate();
+            Dictate();
+            Assert.True(SpinWait.SpinUntil(() => _recorder.StartedDevices.Count == 2, WaitLimit));
+
+            _orchestrator.Cancel();
+
+            Assert.Equal(SpeechOutcome.Cancelled, NextIdle().Outcome);
+            _recognizer.Gate.SetResult();
+            Assert.False(_events.TryTake(out _, 300));
+            Assert.Equal(0, _hotkeys.PasteCalls);
+        }
+
+        // A phrase that fails while the next is under way is still reported, once all are done
+        [Fact]
+        public void EarlierPhraseFailure_IsReportedAtTheEnd()
+        {
+            _recognizer.Gate = new TaskCompletionSource();
+            _recognizer.SegmentsFor = call => call == 0 ? throw new InvalidOperationException("boom") : new[] { " Друга." };
+            Dictate();
+            Dictate();
+            Assert.True(SpinWait.SpinUntil(() => _recorder.StartedDevices.Count == 2, WaitLimit));
+            _recognizer.Gate.SetResult();
+
+            SpeechStateChangedEventArgs idle = NextIdle();
+            Assert.Equal(SpeechOutcome.Failed, idle.Outcome);
+            Assert.Equal("boom", idle.Detail);
+            Assert.Equal(new[] { "Друга." }, _clipboard.SetTexts);
         }
 
         [Fact]
@@ -526,8 +592,9 @@ namespace MovaCore.Tests
             Assert.True(System.Diagnostics.Stopwatch.GetElapsedTime(released, _recorder.StoppedAt) >= TimeSpan.FromMilliseconds(140));
         }
 
+        // Pressed again a moment after the release: the first phrase ends there, and the next one is recorded
         [Fact]
-        public void PressDuringTheTrailingAudio_IsIgnoredWithItsRelease()
+        public void PressDuringTheTrailingAudio_EndsThePhraseAndRecordsTheNext()
         {
             Recreate(trailingAudio: TimeSpan.FromMilliseconds(300));
             _orchestrator.OnHotkeyPressed();
@@ -536,10 +603,11 @@ namespace MovaCore.Tests
 
             Dictate();
 
-            Assert.Equal(SpeechState.Transcribing, Next().State);
             Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
-            Assert.False(_events.TryTake(out _, 200));
-            Assert.Single(_recorder.StartedDevices);
+            Assert.False(_events.TryTake(out _, 400));
+            Assert.Equal(2, _recorder.StartedDevices.Count);
+            Assert.Equal(2, _recognizer.Transcriptions.Count);
+            Assert.Equal(2, _hotkeys.PasteCalls);
         }
 
         [Fact]
@@ -690,6 +758,25 @@ namespace MovaCore.Tests
             Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
 
             Assert.Equal(" так буде краще.", _clipboard.LastSetText);
+        }
+
+        // Said while the first phrase was still being recognized: it continues it all the same
+        [Fact]
+        public void NextPhraseRecordedMeanwhile_ContinuesThePreviousDictation()
+        {
+            var target = new FakeDictationTarget();
+            using var context = new DictationContext(target);
+            Recreate(context: context);
+            _recognizer.Gate = new TaskCompletionSource();
+            _recognizer.SegmentsFor = call => new[] { call == 0 ? " Я думаю, що" : " Так буде краще." };
+
+            Dictate();
+            Dictate();
+            Assert.True(SpinWait.SpinUntil(() => _recorder.StartedDevices.Count == 2, WaitLimit));
+            _recognizer.Gate.SetResult();
+
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+            Assert.Equal(new[] { "Я думаю, що", " так буде краще." }, _clipboard.SetTexts);
         }
 
         [Fact]
