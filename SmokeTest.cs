@@ -48,6 +48,7 @@ namespace MovaCore
         {
             var timer = new System.Windows.Forms.Timer { Interval = StepIntervalMs };
             SettingsForm? form = null;
+            FirstStepsForm? firstSteps = null;
             int step = 0;
 
             timer.Tick += async (s, e) =>
@@ -75,12 +76,14 @@ namespace MovaCore
                             };
                             form = new SettingsForm(new AppSettings(), _ => Task.FromResult<Hotkey?>(null), microphones, gpus, downloads);
                             form.Show();
+                            firstSteps = new FirstStepsForm(new AppSettings(), _ => Task.FromResult<Hotkey?>(null), downloads, firstRun: true);
+                            firstSteps.Show();
                             break;
                         case 1:
                             // Controls on a tab page are created when the page is first shown
                             for (int i = form!.Tabs.TabCount - 1; i >= 0; i--) form.Tabs.SelectedIndex = i;
                             CheckFitsScreen(form, "settings form");
-                            CheckFirstSteps(downloads);
+                            CheckFirstSteps(firstSteps!);
                             await CheckConverterAndClipboardAsync(clipboard, converter);
                             break;
                         case 2:
@@ -157,12 +160,10 @@ namespace MovaCore
         }
 
         // Shown at the first run: it must lay out, and closing it must keep what it suggests (autostart at the first run)
-        private static void CheckFirstSteps(ModelDownloadManager downloads)
+        private static void CheckFirstSteps(FirstStepsForm firstSteps)
         {
-            using var firstSteps = new FirstStepsForm(new AppSettings(), _ => Task.FromResult<Hotkey?>(null), downloads, firstRun: true);
-            firstSteps.Show();
             CheckFitsScreen(firstSteps, "first steps window");
-            firstSteps.Close();
+            firstSteps.Close(); // a form shown without a dialog is disposed by Close
             if (firstSteps.UpdatedSettings is not { LaunchAtStartup: true, SpeechEnabled: false })
                 AppLog.Error("Smoke test: closing the first steps window lost its choices");
         }
