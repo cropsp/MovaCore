@@ -68,7 +68,7 @@ namespace MovaCore.Tests
 
             Assert.Equal(HotkeyModifiers.None, settings.TriggerModifiers);
             Assert.True(settings.SwitchLayout);
-            Assert.True(settings.SelectConvertedText);
+            Assert.False(settings.ReselectConvertedText);
             Assert.False(settings.ConvertLastWord);
             Assert.Equal(CopyPasteKeys.CtrlCV, settings.CopyPasteKeys);
             Assert.NotNull(settings.ExcludedProcesses);
@@ -89,7 +89,7 @@ namespace MovaCore.Tests
             Assert.True(settings.ShowNotifications);
             Assert.True(settings.RestoreClipboard);
             Assert.True(settings.SwitchLayout);
-            Assert.True(settings.SelectConvertedText);
+            Assert.False(settings.ReselectConvertedText);
             Assert.False(settings.ConvertLastWord);
             Assert.Equal(CopyPasteKeys.CtrlCV, settings.CopyPasteKeys);
             Assert.Empty(settings.ExcludedProcesses);
@@ -101,7 +101,56 @@ namespace MovaCore.Tests
             Assert.Equal("auto", settings.SpeechLanguage);
             Assert.Null(settings.SpeechMicrophoneId);
             Assert.True(settings.SpeechUseGpu);
+            Assert.Equal(ModelUnloadTimeout.After5Minutes, settings.SpeechModelUnload);
             Assert.True(settings.SpeechShowOverlay);
+        }
+
+        // Until v1.2 the converted text was selected again by default, and every saved file says so: that value is not
+        // carried over, so the selection that typing would replace is off after an update too
+        [Fact]
+        public void V12File_WithTheOldSelectionSetting_StartsWithoutReselecting()
+        {
+            const string json = "{ \"SwitchLayout\": false, \"SelectConvertedText\": true, \"SpeechUseGpu\": false }";
+
+            AppSettings? settings = JsonSerializer.Deserialize(json, SettingsJsonContext.Default.AppSettings);
+
+            Assert.NotNull(settings);
+            Assert.False(settings.ReselectConvertedText);
+            Assert.False(settings.SwitchLayout);
+            Assert.False(settings.SpeechUseGpu);
+            Assert.Equal(ModelUnloadTimeout.After5Minutes, settings.SpeechModelUnload);
+        }
+
+        [Theory]
+        [InlineData(ModelUnloadTimeout.Immediately, 0)]
+        [InlineData(ModelUnloadTimeout.After2Minutes, 2)]
+        [InlineData(ModelUnloadTimeout.After5Minutes, 5)]
+        [InlineData(ModelUnloadTimeout.After10Minutes, 10)]
+        [InlineData(ModelUnloadTimeout.After15Minutes, 15)]
+        [InlineData(ModelUnloadTimeout.After1Hour, 60)]
+        [InlineData((ModelUnloadTimeout)42, 5)] // a number written by hand: the default
+        public void SpeechModelUnload_GivesTheDelay(ModelUnloadTimeout timeout, int minutes)
+        {
+            var settings = new AppSettings { SpeechModelUnload = timeout };
+
+            Assert.Equal(TimeSpan.FromMinutes(minutes), settings.SpeechModelUnloadDelay);
+        }
+
+        [Fact]
+        public void SpeechModelUnload_Never_HasNoDelay()
+        {
+            Assert.Null(new AppSettings { SpeechModelUnload = ModelUnloadTimeout.Never }.SpeechModelUnloadDelay);
+        }
+
+        [Fact]
+        public void SpeechModelUnload_IsWrittenByName()
+        {
+            string json = JsonSerializer.Serialize(
+                new AppSettings { SpeechModelUnload = ModelUnloadTimeout.After1Hour }, SettingsJsonContext.Default.AppSettings);
+
+            Assert.Contains("\"SpeechModelUnload\": \"After1Hour\"", json);
+            Assert.DoesNotContain("SpeechModelUnloadDelay", json);
+            Assert.DoesNotContain("\"SelectConvertedText\"", json);
         }
 
         private static AppSettings NonDefaultSettings() => new()
@@ -112,7 +161,7 @@ namespace MovaCore.Tests
             ShowNotifications = false,
             RestoreClipboard = false,
             SwitchLayout = false,
-            SelectConvertedText = false,
+            ReselectConvertedText = true,
             ConvertLastWord = true,
             CopyPasteKeys = CopyPasteKeys.CtrlInsertShiftInsert,
             ExcludedProcesses = new List<string> { "devenv", "Code" },
@@ -125,6 +174,7 @@ namespace MovaCore.Tests
             SpeechLanguage = "uk",
             SpeechMicrophoneId = "{0.0.1.00000000}.{a1b2c3}",
             SpeechUseGpu = false,
+            SpeechModelUnload = ModelUnloadTimeout.After15Minutes,
             SpeechShowOverlay = false,
         };
 
@@ -143,7 +193,7 @@ namespace MovaCore.Tests
             Assert.False(restored.ShowNotifications);
             Assert.False(restored.RestoreClipboard);
             Assert.False(restored.SwitchLayout);
-            Assert.False(restored.SelectConvertedText);
+            Assert.True(restored.ReselectConvertedText);
             Assert.True(restored.ConvertLastWord);
             Assert.Equal(CopyPasteKeys.CtrlInsertShiftInsert, restored.CopyPasteKeys);
             Assert.Equal(new[] { "devenv", "Code" }, restored.ExcludedProcesses);
@@ -156,6 +206,7 @@ namespace MovaCore.Tests
             Assert.Equal("uk", restored.SpeechLanguage);
             Assert.Equal("{0.0.1.00000000}.{a1b2c3}", restored.SpeechMicrophoneId);
             Assert.False(restored.SpeechUseGpu);
+            Assert.Equal(ModelUnloadTimeout.After15Minutes, restored.SpeechModelUnload);
             Assert.False(restored.SpeechShowOverlay);
         }
 

@@ -38,11 +38,11 @@ namespace MovaCore.Services
         private static IDisposable? _nativeLog;
 
         private readonly SemaphoreSlim _lock = new(1, 1);
+        private readonly HashSet<string> _warmedUp = new(StringComparer.OrdinalIgnoreCase); // models run on the GPU once
         private WhisperFactory? _factory;
         private WhisperProcessor? _processor;
         private string? _loadedModel;
         private bool _loadedOnGpu;
-        private bool _warmedUp;
         private string? _language;
         private WhisperVadFactory? _vadFactory;
         private WhisperVadProcessor? _vad;
@@ -56,11 +56,7 @@ namespace MovaCore.Services
                 try
                 {
                     WhisperProcessor processor = EnsureLoaded(options);
-                    if (!_warmedUp)
-                    {
-                        _warmedUp = true;
-                        await WarmUpAsync(processor, cancellationToken);
-                    }
+                    await WarmUpAsync(processor, options.ModelPath, cancellationToken);
                 }
                 finally
                 {
@@ -135,12 +131,14 @@ namespace MovaCore.Services
         }
 
         /// <summary>
-        /// The first run on a GPU compiles its shaders, which can take seconds: better while the app starts than on the
-        /// first dictation. On the CPU there is nothing to gain, and a run would only keep every core busy.
+        /// The first run on a GPU compiles its shaders, which can take seconds: better while the app starts (or the user
+        /// speaks) than on the first dictation. ggml keeps the Vulkan device and its compiled shaders until the process
+        /// exits, so a model loaded again after being freed for being idle needs no second run. On the CPU there is
+        /// nothing to gain, and a run would only keep every core busy.
         /// </summary>
-        private async Task WarmUpAsync(WhisperProcessor processor, CancellationToken cancellationToken)
+        private async Task WarmUpAsync(WhisperProcessor processor, string modelPath, CancellationToken cancellationToken)
         {
-            if (!_loadedOnGpu) return;
+            if (!_loadedOnGpu || !_warmedUp.Add(modelPath)) return;
             long started = Stopwatch.GetTimestamp();
             var silence = new float[AudioSamples.SampleRate * 5 / 4];
             await processor.ProcessWithUtf8HandlerAsync(silence, _ => { }, cancellationToken);
@@ -239,7 +237,6 @@ namespace MovaCore.Services
             _processor = null;
             _factory = null;
             _loadedModel = null;
-            _warmedUp = false;
         }
 
         private void FreeVad()

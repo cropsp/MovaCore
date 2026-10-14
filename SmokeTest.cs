@@ -398,16 +398,25 @@ namespace MovaCore
             }
 
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            var watch = Stopwatch.StartNew();
-            IReadOnlyList<string> segments = await recognizer.TranscribeAsync(
-                AudioSamples.PadToMinimum(audio, SpeechOrchestrator.MinAudioLength),
-                new SpeechOptions(modelPath, "en", UseGpu: true),
-                timeout.Token);
-            // Synthetic audio, so the text may be logged
-            string text = TranscriptText.Clean(segments);
-            AppLog.Info($"Smoke test: transcribed in {watch.Elapsed.TotalSeconds:0.0} s: \"{text}\"");
-            if (audioPath != null && !text.Contains("hello", StringComparison.OrdinalIgnoreCase))
-                AppLog.Error("Smoke test: the recording of \"hello world\" was not recognized");
+            var options = new SpeechOptions(modelPath, "en", UseGpu: true);
+            float[] padded = AudioSamples.PadToMinimum(audio, SpeechOrchestrator.MinAudioLength);
+
+            // As dictation does it: loaded (and warmed up on the GPU) ahead of time, transcribed, freed once idle, and
+            // loaded again at the next press. The second load must work as the first did.
+            for (int run = 1; run <= 2; run++)
+            {
+                var watch = Stopwatch.StartNew();
+                await recognizer.PreloadAsync(options, timeout.Token);
+                AppLog.Info($"Smoke test: model loaded ({run}) in {watch.Elapsed.TotalSeconds:0.0} s");
+                watch.Restart();
+                IReadOnlyList<string> segments = await recognizer.TranscribeAsync(padded, options, timeout.Token);
+                // Synthetic audio, so the text may be logged
+                string text = TranscriptText.Clean(segments);
+                AppLog.Info($"Smoke test: transcribed ({run}) in {watch.Elapsed.TotalSeconds:0.0} s: \"{text}\"");
+                if (audioPath != null && !text.Contains("hello", StringComparison.OrdinalIgnoreCase))
+                    AppLog.Error($"Smoke test: the recording of \"hello world\" was not recognized ({run})");
+                await recognizer.UnloadAsync();
+            }
         }
 
         // The Silero model ships with the app: speech must be found in the recording and none in silence

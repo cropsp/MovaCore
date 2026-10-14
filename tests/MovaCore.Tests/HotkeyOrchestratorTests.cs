@@ -256,10 +256,25 @@ namespace MovaCore.Tests
             Assert.Equal(1, _hotkeys.PasteCalls);
         }
 
-        // Re-selecting the pasted text lets a second press convert it back
+        // Typing right after a conversion would replace a selection, so the pasted text is not selected by default
+        [Fact]
+        public async Task ByDefault_PastedTextIsNotSelectedAgain()
+        {
+            _hotkeys.OnCopy = () => _clipboard.SimulateAppCopy("ghbdsn");
+
+            await _orchestrator.ExecuteConversionAsync();
+
+            Assert.Equal("привіт", _clipboard.LastSetText);
+            Assert.Empty(_hotkeys.SelectLeftCalls);
+            Assert.Equal(new[] { KeyboardLanguage.Ukrainian }, _layouts.Switches);
+            Assert.Equal(1, _clipboard.RestoreCalls);
+        }
+
+        // Re-selecting the pasted text (an option) lets a second press convert it back
         [Fact]
         public async Task PastedText_IsSelectedAgainAndTheLayoutIsSwitched()
         {
+            _orchestrator.ReselectConvertedText = true;
             _hotkeys.OnCopy = () => _clipboard.SimulateAppCopy("ghbdsn");
 
             await _orchestrator.ExecuteConversionAsync();
@@ -273,6 +288,7 @@ namespace MovaCore.Tests
         [Fact]
         public async Task UkrainianLayoutText_SwitchesTheLayoutToEnglish()
         {
+            _orchestrator.ReselectConvertedText = true;
             _hotkeys.OnCopy = () => _clipboard.SimulateAppCopy("Руддщ");
 
             await _orchestrator.ExecuteConversionAsync();
@@ -285,7 +301,7 @@ namespace MovaCore.Tests
         [Fact]
         public async Task SelectAndSwitchDisabled_PastesWithoutSelectingOrSwitching()
         {
-            _orchestrator.SelectConvertedText = false;
+            _orchestrator.ReselectConvertedText = false;
             _orchestrator.SwitchLayout = false;
             _hotkeys.OnCopy = () => _clipboard.SimulateAppCopy("ghbdsn");
 
@@ -300,7 +316,7 @@ namespace MovaCore.Tests
         [Fact]
         public async Task SelectDisabled_StillSwitchesTheLayout()
         {
-            _orchestrator.SelectConvertedText = false;
+            _orchestrator.ReselectConvertedText = false;
             _hotkeys.OnCopy = () => _clipboard.SimulateAppCopy("ghbdsn");
 
             await _orchestrator.ExecuteConversionAsync();
@@ -312,6 +328,7 @@ namespace MovaCore.Tests
         [Fact]
         public async Task SwitchDisabled_StillSelectsTheConvertedText()
         {
+            _orchestrator.ReselectConvertedText = true;
             _orchestrator.SwitchLayout = false;
             _hotkeys.OnCopy = () => _clipboard.SimulateAppCopy("ghbdsn");
 
@@ -325,6 +342,7 @@ namespace MovaCore.Tests
         [Fact]
         public async Task PasteNotObserved_DoesNotSelectSwitchOrRestore()
         {
+            _orchestrator.ReselectConvertedText = true;
             _clipboard.SimulateAppCopy("user clipboard");
             _clipboard.PasteObserved = false;
             _hotkeys.OnCopy = () => _clipboard.SimulateAppCopy("ghbdsn");
@@ -343,6 +361,7 @@ namespace MovaCore.Tests
         [InlineData("ghbdsn\r", "привіт\r")]
         public async Task MultiLineSelection_IsConvertedButNotSelectedAgain(string selection, string expected)
         {
+            _orchestrator.ReselectConvertedText = true;
             _hotkeys.OnCopy = () => _clipboard.SimulateAppCopy(selection);
 
             await _orchestrator.ExecuteConversionAsync();
@@ -357,6 +376,7 @@ namespace MovaCore.Tests
         [Fact]
         public async Task SelectedAgain_CountsTextElementsNotUtf16Units()
         {
+            _orchestrator.ReselectConvertedText = true;
             _hotkeys.OnCopy = () => _clipboard.SimulateAppCopy("ghbdsn\U0001F600");
 
             await _orchestrator.ExecuteConversionAsync();
@@ -369,6 +389,7 @@ namespace MovaCore.Tests
         [Fact]
         public async Task TextOfThreeHundredElements_IsSelectedAgain()
         {
+            _orchestrator.ReselectConvertedText = true;
             _hotkeys.OnCopy = () => _clipboard.SimulateAppCopy(new string('f', 300));
 
             await _orchestrator.ExecuteConversionAsync();
@@ -381,6 +402,7 @@ namespace MovaCore.Tests
         [Fact]
         public async Task TextOfMoreThanThreeHundredElements_IsPastedButNotSelectedAgain()
         {
+            _orchestrator.ReselectConvertedText = true;
             _hotkeys.OnCopy = () => _clipboard.SimulateAppCopy(new string('f', 301));
 
             await _orchestrator.ExecuteConversionAsync();
@@ -396,6 +418,7 @@ namespace MovaCore.Tests
         public async Task ConvertLastWord_NothingSelected_SelectsTheWordLeftAndConvertsIt()
         {
             _orchestrator.ConvertLastWord = true;
+            _orchestrator.ReselectConvertedText = true;
             _hotkeys.OnSelectWordLeft = () => _hotkeys.OnCopy = () => _clipboard.SimulateAppCopy("ghbdsn");
 
             await _orchestrator.ExecuteConversionAsync();

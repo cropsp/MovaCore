@@ -5,6 +5,17 @@ All notable changes to MovaCore are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- The converted text is no longer selected again after a conversion, so typing right after it no longer replaces it.
+  To undo a conversion with a second press, turn on **Select the converted text** on the Layout tab. The setting
+  starts off after the update too, also where it was on before.
+- The speech model is freed from memory (on the graphics card, if it is used) 5 minutes after the last dictation, as
+  in Handy, and loaded again while you speak at the next one. **Unload the model from memory** on the Voice tab
+  offers right after dictation, 2, 5, 10 or 15 minutes, an hour, or never. Saving the settings no longer loads a
+  model that was freed, unless another model or the graphics card option was chosen.
+- On the graphics card, the first dictation's warm-up run (shader compilation) is not repeated when the model is
+  loaded again, since the compiled shaders stay in memory.
+
 ## [1.2.0] - 2026-10-06
 
 ### Added

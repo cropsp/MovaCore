@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 using SharpHook.Data;
@@ -20,8 +21,12 @@ namespace MovaCore.Models
         /// <summary>Switch the target window to the keyboard layout of the converted text.</summary>
         public bool SwitchLayout { get; set; } = true;
 
-        /// <summary>Select the converted text again, so that a second press converts it back.</summary>
-        public bool SelectConvertedText { get; set; } = true;
+        /// <summary>
+        /// Select the converted text again, so that a second press converts it back. Off by default since v1.3: typing
+        /// right after a conversion replaced the selected text. Until v1.2 this was SelectConvertedText (on by default);
+        /// the new name lets every settings file start with it off.
+        /// </summary>
+        public bool ReselectConvertedText { get; set; } = false;
 
         /// <summary>When nothing is selected, select the word left of the caret and convert it (off: see the plan).</summary>
         public bool ConvertLastWord { get; set; } = false;
@@ -53,6 +58,9 @@ namespace MovaCore.Models
         /// <summary>Transcribe on the GPU through Vulkan where available (x64 only).</summary>
         public bool SpeechUseGpu { get; set; } = true;
 
+        /// <summary>When the speech model is freed from memory after the last dictation (as in Handy, 5 minutes by default).</summary>
+        public ModelUnloadTimeout SpeechModelUnload { get; set; } = ModelUnloadTimeout.After5Minutes;
+
         /// <summary>Show the small recording indicator near the bottom of the screen.</summary>
         public bool SpeechShowOverlay { get; set; } = true;
 
@@ -66,6 +74,20 @@ namespace MovaCore.Models
                 TriggerModifiers = value.Modifiers;
             }
         }
+
+        /// <summary>How long the speech model stays loaded after a dictation; null: as long as dictation is on.</summary>
+        [JsonIgnore]
+        public TimeSpan? SpeechModelUnloadDelay => SpeechModelUnload switch
+        {
+            ModelUnloadTimeout.Never => null,
+            ModelUnloadTimeout.Immediately => TimeSpan.Zero,
+            ModelUnloadTimeout.After2Minutes => TimeSpan.FromMinutes(2),
+            ModelUnloadTimeout.After5Minutes => TimeSpan.FromMinutes(5),
+            ModelUnloadTimeout.After10Minutes => TimeSpan.FromMinutes(10),
+            ModelUnloadTimeout.After15Minutes => TimeSpan.FromMinutes(15),
+            ModelUnloadTimeout.After1Hour => TimeSpan.FromHours(1),
+            _ => TimeSpan.FromMinutes(5), // a number written by hand that is not a choice
+        };
 
         [JsonIgnore]
         public Hotkey SpeechHotkey

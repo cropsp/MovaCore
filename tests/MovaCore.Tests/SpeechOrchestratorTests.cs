@@ -32,7 +32,7 @@ namespace MovaCore.Tests
         private SpeechOrchestrator Create(
             TimeSpan? minRecording = null, TimeSpan? maxRecording = null, string? modelPath = "", ISpeechDetector? detector = null,
             TimeSpan? keepMicrophoneOpen = null, TimeSpan? trailingAudio = null, TimeSpan? noticeableHold = null,
-            DictationContext? context = null)
+            DictationContext? context = null, TimeSpan? unloadAfter = null)
         {
             var paster = new TextPaster(_hotkeys, _clipboard, new ClipboardGate())
             {
@@ -48,23 +48,25 @@ namespace MovaCore.Tests
                 NoticeableHold = noticeableHold ?? TimeSpan.FromHours(1),
             };
             orchestrator.StateChanged += (_, e) => _events.Add(e);
-            orchestrator.Configure(Settings(modelPath == "" ? _modelPath : modelPath));
+            orchestrator.Configure(Settings(modelPath == "" ? _modelPath : modelPath, unloadAfter));
             return orchestrator;
         }
 
         private void Recreate(
             TimeSpan? minRecording = null, TimeSpan? maxRecording = null, string? modelPath = "", ISpeechDetector? detector = null,
             TimeSpan? keepMicrophoneOpen = null, TimeSpan? trailingAudio = null, TimeSpan? noticeableHold = null,
-            DictationContext? context = null)
+            DictationContext? context = null, TimeSpan? unloadAfter = null)
         {
             _orchestrator.Dispose();
             _events.Dispose();
             _events = new BlockingCollection<SpeechStateChangedEventArgs>();
-            _orchestrator = Create(minRecording, maxRecording, modelPath, detector, keepMicrophoneOpen, trailingAudio, noticeableHold, context);
+            _orchestrator = Create(
+                minRecording, maxRecording, modelPath, detector, keepMicrophoneOpen, trailingAudio, noticeableHold, context, unloadAfter);
         }
 
-        private static SpeechSettings Settings(string? modelPath) =>
-            new(true, modelPath, "uk", false, "{mic-1}", true);
+        // The model stays loaded unless a test says otherwise
+        private static SpeechSettings Settings(string? modelPath, TimeSpan? unloadAfter = null) =>
+            new(true, modelPath, "uk", false, "{mic-1}", true, unloadAfter);
 
         private SpeechStateChangedEventArgs Next()
         {
@@ -644,6 +646,112 @@ namespace MovaCore.Tests
             _orchestrator.Configure(Settings(_modelPath));
 
             await WaitUntil(() => _recognizer.Unloads > 0);
+        }
+
+        // As in Handy, the model is freed once dictation has not used it for a while
+        [Fact]
+        public async Task Model_IsFreedAfterItIsIdle()
+        {
+            Recreate(unloadAfter: TimeSpan.FromMilliseconds(100));
+
+            Dictate();
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+
+            await WaitUntil(() => _recognizer.Unloads > 0);
+        }
+
+        [Fact]
+        public async Task Press_CancelsThePendingUnload()
+        {
+            Recreate(unloadAfter: TimeSpan.FromMilliseconds(300));
+            Dictate();
+            NextIdle();
+
+            _orchestrator.OnHotkeyPressed();
+            Assert.Equal(SpeechState.Recording, Next().State);
+            await Task.Delay(500);
+
+            Assert.Equal(0, _recognizer.Unloads);
+            _orchestrator.OnHotkeyReleased();
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+            await WaitUntil(() => _recognizer.Unloads > 0);
+        }
+
+        // Nothing is kept: the model loads while the user speaks and is freed as soon as the text is pasted
+        [Fact]
+        public async Task ImmediateUnload_LoadsOnThePressAndFreesAfterTheDictation()
+        {
+            Recreate(unloadAfter: TimeSpan.Zero);
+            await WaitUntil(() => _recognizer.Unloads > 0); // a model loaded before is freed when the setting is applied
+            int unloads = _recognizer.Unloads;
+            lock (_recognizer.Preloads) _recognizer.Preloads.Clear(); // the one made for the constructor's settings
+            await Task.Delay(100);
+            Assert.Empty(_recognizer.Preloads);
+
+            Dictate();
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+
+            await WaitUntil(() => _recognizer.Unloads > unloads);
+            Assert.Single(_recognizer.Preloads);
+            Assert.Single(_recognizer.Transcriptions);
+        }
+
+        [Fact]
+        public async Task NeverUnload_KeepsTheModel()
+        {
+            Dictate();
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+
+            await Task.Delay(300);
+
+            Assert.Equal(0, _recognizer.Unloads);
+        }
+
+        // Saving the settings again does not bring back a model freed for being idle
+        [Fact]
+        public async Task SameModelConfiguredAgain_IsNotLoadedAgain()
+        {
+            await WaitUntil(() => _recognizer.Preloads.Count > 0);
+            lock (_recognizer.Preloads) _recognizer.Preloads.Clear();
+
+            _orchestrator.Configure(new SpeechSettings(true, _modelPath, "en", false, null, false, null));
+            await Task.Delay(200);
+
+            Assert.Empty(_recognizer.Preloads);
+        }
+
+        [Fact]
+        public async Task OtherModelConfigured_IsLoadedAheadOfTime()
+        {
+            await WaitUntil(() => _recognizer.Preloads.Count > 0);
+            lock (_recognizer.Preloads) _recognizer.Preloads.Clear();
+
+            _orchestrator.Configure(new SpeechSettings(true, _modelPath, "uk", true, "{mic-1}", true, null));
+
+            await WaitUntil(() => _recognizer.Preloads.Count > 0);
+            Assert.Equal(new SpeechOptions(_modelPath, "uk", true), _recognizer.Preloads[0]);
+        }
+
+        // Turning the unloading on applies to the model that is already loaded
+        [Fact]
+        public async Task ShorterUnloadDelay_AppliesWithoutADictation()
+        {
+            await WaitUntil(() => _recognizer.Preloads.Count > 0);
+
+            _orchestrator.Configure(Settings(_modelPath, TimeSpan.FromMilliseconds(100)));
+
+            await WaitUntil(() => _recognizer.Unloads > 0);
+        }
+
+        [Fact]
+        public async Task KeepingTheModel_CancelsThePendingUnload()
+        {
+            Recreate(unloadAfter: TimeSpan.FromMilliseconds(300));
+
+            _orchestrator.Configure(Settings(_modelPath, unloadAfter: null));
+            await Task.Delay(500);
+
+            Assert.Equal(0, _recognizer.Unloads);
         }
 
         // "Я думаю, що" then "Так буде краще." becomes one sentence

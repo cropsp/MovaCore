@@ -97,7 +97,7 @@ namespace MovaCore
             _hotkeyService.CopyPasteKeys = _currentSettings.CopyPasteKeys;
             _orchestrator.RestoreClipboard = _currentSettings.RestoreClipboard;
             _orchestrator.SwitchLayout = _currentSettings.SwitchLayout;
-            _orchestrator.SelectConvertedText = _currentSettings.SelectConvertedText;
+            _orchestrator.ReselectConvertedText = _currentSettings.ReselectConvertedText;
             _orchestrator.ConvertLastWord = _currentSettings.ConvertLastWord;
             ApplySpeechSettings();
         }
@@ -112,7 +112,8 @@ namespace MovaCore
                 s.SpeechLanguage,
                 s.SpeechUseGpu,
                 s.SpeechMicrophoneId,
-                s.RestoreClipboard));
+                s.RestoreClipboard,
+                s.SpeechModelUnloadDelay));
 
             // Turning dictation on downloads the chosen model (and resumes an interrupted download at startup), unless
             // the user has just cancelled that download, or deleted the model, in the settings

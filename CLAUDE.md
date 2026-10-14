@@ -74,9 +74,10 @@ The conversion pipeline runs across these files:
    marshals worker-thread events (`ConversionFailed`, `HookFailed`) back to the UI thread before touching `NotifyIcon`.
 3. **`Services/HotkeyOrchestrator.cs`** performs the clipboard round-trip: capture a snapshot of the user's clipboard →
    simulate Ctrl+C → wait (up to `CopyTimeout`) for the clipboard sequence number to change → read and convert →
-   put the converted text on the clipboard → simulate Ctrl+V → wait until the target app reads it → re-select the
-   pasted text (single-line, ≤ 300 text elements) → switch the window's layout to the target language → restore the
-   snapshot. With `ConvertLastWord` (off by default) an empty copy is retried after Ctrl+Shift+Left. If the sequence number does not change, nothing was selected and the clipboard is left alone. The
+   put the converted text on the clipboard → simulate Ctrl+V → wait until the target app reads it → with
+   `ReselectConvertedText` (off by default since v1.3: typing replaced the selection; the setting was renamed so old
+   files start with it off) re-select the pasted text (single-line, ≤ 300 text elements) → switch the window's layout
+   to the target language → restore the snapshot. With `ConvertLastWord` (off by default) an empty copy is retried after Ctrl+Shift+Left. If the sequence number does not change, nothing was selected and the clipboard is left alone. The
    snapshot is restored only after the paste is observed: restoring earlier would paste the old content instead.
    A second hotkey press while a conversion runs is dropped (`ClipboardGate.TryEnter`, shared with dictation).
    `ConversionFailed` reports errors (a tray balloon) in addition to the log.
@@ -110,7 +111,10 @@ Dictation (hold-to-talk) reuses the hook, the clipboard service and the paste:
   read before the paste, e.g. by a clipboard manager, hides the paste itself, so it then restores after a pause; it
   waits for the `ClipboardGate` instead of dropping the text). `NoSpeech`/`NoSignal` are reported only after a hold
   of ≥ 1 s. It keeps the microphone open for 30 s after a dictation (`KeepMicrophoneOpen`), loads the model when
-  configured and frees it when dictation is turned off or the model file is gone, enforces a 2-minute limit (a
+  a model is newly configured (not on every settings save), frees it after `SpeechSettings.UnloadAfter` without a
+  dictation (`ModelUnloadTimeout`, 5 min by default as in Handy; `Immediately` frees it after every dictation and never
+  preloads; a press loads it again while the user speaks) and at once when dictation is turned off or the model file
+  is gone, enforces a 2-minute limit (a
   release during a UAC prompt is never seen) and reports `StateChanged` (state, outcome, `SpeechError`) on a worker
   thread. Before pasting, `TranscriptJoiner` fits the phrase to `DictationContext`: the last dictated text, valid
   only while the focus (`IDictationTarget`, i.e. `WindowsDictationTarget`: `GetGUIThreadInfo`) is unchanged and the
@@ -125,7 +129,8 @@ Dictation (hold-to-talk) reuses the hook, the clipboard service and the paste:
   (`RuntimeOptions.ForcedRuntimeLibrary`): Vulkan if the GPU option is on and `vulkan-1.dll` loads (with
   `VK_LOADER_LAYERS_DISABLE=~implicit~`: overlay layers crash Vulkan apps), else the CPU, and on x64 only after an
   AVX2/FMA/F16C check (ggml's CPU code dies with an illegal instruction without them). A model loaded on the GPU gets
-  one warm-up run (shader compilation). It is also the `ISpeechDetector`: whisper.cpp's Silero VAD with
+  one warm-up run (shader compilation) per process: ggml keeps the Vulkan device and its compiled shaders after the
+  model is freed, so a reload needs none. It is also the `ISpeechDetector`: whisper.cpp's Silero VAD with
   `models\ggml-silero-v6.2.0.bin` next to the exe, which `eng/get-vad-model.ps1` puts into the publish output (CI and
   `publish.ps1`; a plain `dotnet build` has none, so the energy threshold is used).
 - **`Services/ModelDownloader.cs`** is the only network code: it downloads a `SpeechModelCatalog` model from

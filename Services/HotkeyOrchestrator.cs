@@ -18,7 +18,7 @@ namespace MovaCore.Services
 
         private volatile bool _restoreClipboard = true;
         private volatile bool _switchLayout = true;
-        private volatile bool _selectConvertedText = true;
+        private volatile bool _reselectConvertedText;
         private volatile bool _convertLastWord;
 
         public event EventHandler<string>? ConversionFailed;
@@ -37,11 +37,14 @@ namespace MovaCore.Services
             set => _switchLayout = value;
         }
 
-        /// <summary>Select the pasted text again, so a second press converts it back (a user setting).</summary>
-        public bool SelectConvertedText
+        /// <summary>
+        /// Select the pasted text again, so a second press converts it back (a user setting, off by default: typing
+        /// right after a conversion would replace the selection).
+        /// </summary>
+        public bool ReselectConvertedText
         {
-            get => _selectConvertedText;
-            set => _selectConvertedText = value;
+            get => _reselectConvertedText;
+            set => _reselectConvertedText = value;
         }
 
         /// <summary>With nothing selected, convert the word before the caret (a user setting, off by default).</summary>
@@ -126,7 +129,7 @@ namespace MovaCore.Services
                 long pasteStarted = Stopwatch.GetTimestamp();
                 _hotkeyService.SimulatePaste();
 
-                if (snapshot == null && !SelectConvertedText && !SwitchLayout) return;
+                if (snapshot == null && !ReselectConvertedText && !SwitchLayout) return;
 
                 // 4. Everything else waits until the app has actually read the converted text. Restoring earlier would
                 //    make it paste the old clipboard content instead; if it never reads it, the converted text stays.
@@ -144,7 +147,7 @@ namespace MovaCore.Services
                     await Task.Delay(RestoreDelay);
                 }
 
-                if (SelectConvertedText && TryCountCaretSteps(converted, out int steps))
+                if (ReselectConvertedText && TryCountCaretSteps(converted, out int steps))
                     _hotkeyService.SimulateSelectLeft(steps);
 
                 if (SwitchLayout)

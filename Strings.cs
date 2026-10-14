@@ -161,6 +161,10 @@ namespace MovaCore
             "Select the converted text (pressing again reverts it)",
             "Виділяти конвертований текст (повторне натискання поверне оригінал)");
 
+        public static string SelectConvertedTextTooltip => T(
+            "Typing right after a conversion then replaces the converted text.",
+            "Тоді текст, набраний одразу після конвертації, замінить конвертований.");
+
         public static string ConvertLastWord => T(
             "If nothing is selected, convert the last word",
             "Якщо нічого не виділено, конвертувати останнє слово");
@@ -273,6 +277,24 @@ namespace MovaCore
             "Набагато швидше з відеокартами NVIDIA, AMD чи Intel. Зміна діє після перезапуску MovaCore.");
 
         public static string SpeechUseGpuUnavailable => T("Not available on ARM devices.", "Недоступно на пристроях ARM.");
+        public static string SpeechModelUnloadLabel => T("Unload the model from memory:", "Вивантажувати модель з пам'яті:");
+
+        public static string SpeechModelUnloadTooltip => T(
+            "Frees the memory the model takes (on the graphics card, if it is used) once voice input has not been used for this long. The next dictation loads the model again while you speak.",
+            "Звільняє пам'ять, яку займає модель (на відеокарті, якщо вона використовується), коли голосовим введенням не користувалися стільки часу. Наступне диктування знову завантажить модель, поки ви говорите.");
+
+        public static string SpeechModelUnloadName(ModelUnloadTimeout timeout) => timeout switch
+        {
+            ModelUnloadTimeout.Never => T("Never", "Ніколи"),
+            ModelUnloadTimeout.Immediately => T("Right after dictation", "Одразу після диктування"),
+            ModelUnloadTimeout.After2Minutes => T("After 2 minutes", "Через 2 хвилини"),
+            ModelUnloadTimeout.After5Minutes => T("After 5 minutes", "Через 5 хвилин"),
+            ModelUnloadTimeout.After10Minutes => T("After 10 minutes", "Через 10 хвилин"),
+            ModelUnloadTimeout.After15Minutes => T("After 15 minutes", "Через 15 хвилин"),
+            ModelUnloadTimeout.After1Hour => T("After an hour", "Через годину"),
+            _ => timeout.ToString(),
+        };
+
         public static string SpeechShowOverlay => T("Show the recording indicator", "Показувати індикатор запису");
 
         public static string SpeechPrivacy => T(

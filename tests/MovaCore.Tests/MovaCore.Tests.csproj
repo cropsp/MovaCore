@@ -25,6 +25,7 @@
     <Compile Include="../../Models/HotkeyModifiers.cs" Link="Linked/HotkeyModifiers.cs" />
     <Compile Include="../../Models/CopyPasteKeys.cs" Link="Linked/CopyPasteKeys.cs" />
     <Compile Include="../../Models/UiLanguage.cs" Link="Linked/UiLanguage.cs" />
+    <Compile Include="../../Models/ModelUnloadTimeout.cs" Link="Linked/ModelUnloadTimeout.cs" />
     <Compile Include="../../Models/KeyboardLanguage.cs" Link="Linked/KeyboardLanguage.cs" />
     <Compile Include="../../Services/HotkeyMatching.cs" Link="Linked/HotkeyMatching.cs" />
     <Compile Include="../../Services/HotkeyAction.cs" Link="Linked/HotkeyAction.cs" />

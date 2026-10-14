@@ -25,6 +25,12 @@ namespace MovaCore.UI
         // The combo box items, in the order they are listed
         private static readonly CopyPasteKeys[] CopyPasteOptions = { CopyPasteKeys.CtrlCV, CopyPasteKeys.CtrlInsertShiftInsert };
         private static readonly UiLanguage[] LanguageOptions = { UiLanguage.Auto, UiLanguage.English, UiLanguage.Ukrainian };
+        private static readonly ModelUnloadTimeout[] ModelUnloadOptions =
+        {
+            ModelUnloadTimeout.Immediately, ModelUnloadTimeout.After2Minutes, ModelUnloadTimeout.After5Minutes,
+            ModelUnloadTimeout.After10Minutes, ModelUnloadTimeout.After15Minutes, ModelUnloadTimeout.After1Hour,
+            ModelUnloadTimeout.Never,
+        };
 
         private readonly AppSettings _settings;
         private readonly Func<CancellationToken, Task<Hotkey?>> _captureHotkey;
@@ -61,6 +67,7 @@ namespace MovaCore.UI
         private readonly ComboBox _speechLanguageComboBox = new();
         private readonly ComboBox _microphoneComboBox = new();
         private readonly CheckBox _useGpuCheckBox = new();
+        private readonly ComboBox _modelUnloadComboBox = new();
         private readonly CheckBox _overlayCheckBox = new();
         private readonly Button _saveButton = new();
         private readonly Button _cancelButton = new();
@@ -263,7 +270,8 @@ namespace MovaCore.UI
         private Control CreateConversionGroup()
         {
             ConfigureCheckBox(_switchLayoutCheckBox, Strings.SwitchLayout, _settings.SwitchLayout);
-            ConfigureCheckBox(_selectConvertedCheckBox, Strings.SelectConvertedText, _settings.SelectConvertedText);
+            ConfigureCheckBox(_selectConvertedCheckBox, Strings.SelectConvertedText, _settings.ReselectConvertedText);
+            _toolTip.SetToolTip(_selectConvertedCheckBox, Strings.SelectConvertedTextTooltip);
             ConfigureCheckBox(_convertLastWordCheckBox, Strings.ConvertLastWord, _settings.ConvertLastWord);
             _toolTip.SetToolTip(_convertLastWordCheckBox, Strings.ConvertLastWordTooltip);
 
@@ -396,6 +404,17 @@ namespace MovaCore.UI
             {
                 _toolTip.SetToolTip(_useGpuCheckBox, Strings.SpeechUseGpuTooltip);
             }
+
+            var unloadItems = new List<object>();
+            foreach (ModelUnloadTimeout option in ModelUnloadOptions) unloadItems.Add(Strings.SpeechModelUnloadName(option));
+            int selectedUnload = Array.IndexOf(ModelUnloadOptions, _settings.SpeechModelUnload);
+            // An unknown value (a number written by hand into settings.json) shows the default, which dictation uses for it
+            if (selectedUnload < 0) selectedUnload = Array.IndexOf(ModelUnloadOptions, ModelUnloadTimeout.After5Minutes);
+            var unloadLabel = new Label { Text = Strings.SpeechModelUnloadLabel };
+            ConfigureComboBox(_modelUnloadComboBox, Strings.SpeechModelUnloadLabel, unloadItems.ToArray(), selectedUnload);
+            _toolTip.SetToolTip(unloadLabel, Strings.SpeechModelUnloadTooltip);
+            _toolTip.SetToolTip(_modelUnloadComboBox, Strings.SpeechModelUnloadTooltip);
+
             ConfigureCheckBox(_overlayCheckBox, Strings.SpeechShowOverlay, _settings.SpeechShowOverlay);
 
             return CreateGroup(
@@ -403,6 +422,7 @@ namespace MovaCore.UI
                 CreateLabeledRow(new Label { Text = Strings.SpeechLanguageLabel }, _speechLanguageComboBox),
                 CreateLabeledRow(new Label { Text = Strings.SpeechMicrophoneLabel }, _microphoneComboBox),
                 _useGpuCheckBox,
+                CreateLabeledRow(unloadLabel, _modelUnloadComboBox),
                 _overlayCheckBox);
         }
 
@@ -590,7 +610,8 @@ namespace MovaCore.UI
             bool enabled = _speechEnabledCheckBox.Checked;
             foreach (Control control in new Control[]
             {
-                _speechPicker, _modelComboBox, _customModelRow, _speechLanguageComboBox, _microphoneComboBox, _overlayCheckBox,
+                _speechPicker, _modelComboBox, _customModelRow, _speechLanguageComboBox, _microphoneComboBox, _modelUnloadComboBox,
+                _overlayCheckBox,
             })
             {
                 control.Enabled = enabled;
@@ -754,7 +775,7 @@ namespace MovaCore.UI
                 ShowNotifications = _notifyCheckBox.Checked,
                 RestoreClipboard = _restoreClipboardCheckBox.Checked,
                 SwitchLayout = _switchLayoutCheckBox.Checked,
-                SelectConvertedText = _selectConvertedCheckBox.Checked,
+                ReselectConvertedText = _selectConvertedCheckBox.Checked,
                 ConvertLastWord = _convertLastWordCheckBox.Checked,
                 CopyPasteKeys = CopyPasteOptions[Math.Max(_copyPasteComboBox.SelectedIndex, 0)],
                 ExcludedProcesses = ParseExcludedProcesses(),
@@ -769,6 +790,7 @@ namespace MovaCore.UI
                 SpeechUseGpu = RuntimeInformation.ProcessArchitecture == Architecture.Arm64
                     ? _settings.SpeechUseGpu
                     : _useGpuCheckBox.Checked,
+                SpeechModelUnload = ModelUnloadOptions[Math.Max(_modelUnloadComboBox.SelectedIndex, 0)],
                 SpeechShowOverlay = _overlayCheckBox.Checked,
             };
         }

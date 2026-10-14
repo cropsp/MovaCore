@@ -31,8 +31,8 @@
 ## What it does
 
 **Fix the layout.** Typed `ghbdsn` when you meant `привіт`? Select it and press **F10**. MovaCore retypes the text in
-the other layout and switches your keyboard to that language. The text stays selected, so pressing **F10** again
-undoes it. It works both ways (`Руддщ` → `Hello`) and in almost any app.
+the other layout and switches your keyboard to that language, so you can just keep typing. It works both ways
+(`Руддщ` → `Hello`) and in almost any app.
 
 **Type with your voice.** Hold **ScrollLock**, speak, and let go. Whisper recognizes your speech on your own computer,
 and the text appears where the cursor is. Nothing you say leaves your PC. [Set it up](#voice-input).
@@ -88,13 +88,17 @@ starting: wait until the grass turns green.
   what is before the cursor, so the phrase is pasted as Whisper wrote it.
 - **The microphone stays open** for 30 seconds after each dictation, so the next one starts instantly. Meanwhile
   Windows shows the microphone as in use, and a Bluetooth headset stays in its lower-quality headset mode.
+- **Memory.** The model takes at least as much memory as its file (about 1 GB by default), on the graphics card if
+  you use it. MovaCore unloads it 5 minutes after the last dictation, so games and other programs get that memory
+  back; the next dictation loads it again while you speak. Choose another time, or **Never**, under **Unload the model from memory** on the Voice tab.
 - **The hotkey** can be changed on the Voice tab.
 
 </details>
 
 ## Features
 
-- **Undo with the same key.** The converted text stays selected; press the hotkey again to convert it back.
+- **Undo with the same key, if you want it.** Turn on **Select the converted text** in Settings → Layout, and a
+  second press converts the text back. It is off by default, since typing would replace the selected text.
 - **Keeps your clipboard.** After converting or dictating, MovaCore puts back whatever you had copied, and its own
   text stays out of Windows clipboard history (Win+V). You can turn this off.
 - **Follows your layouts.** Conversion uses the English and Ukrainian layouts installed in Windows, including
@@ -166,7 +170,9 @@ Windows lets desktop apps use the microphone (Windows Settings → Privacy & sec
 <summary>Voice input is slow</summary>
 
 On x64, turn on **Use the graphics card (Vulkan)** on the Voice tab and restart MovaCore. Otherwise, choose the smaller
-model. Right after MovaCore starts, loading the model takes a few seconds.
+model. Right after MovaCore starts, loading the model takes a few seconds. The model is also loaded again after it has
+been unloaded for lack of use (after 5 minutes by default): for a short phrase, that can add a moment. Choose a longer
+time, or **Never**, under **Unload the model from memory** on the Voice tab.
 
 </details>
 

@@ -169,6 +169,31 @@ namespace MovaCore.Tests
         }
 
         [Theory]
+        [MemberData(nameof(Languages))]
+        public void EveryModelUnloadChoice_HasADistinctName(UiLanguage language)
+        {
+            Strings.Language = language;
+
+            ModelUnloadTimeout[] choices = Enum.GetValues<ModelUnloadTimeout>();
+            string[] names = choices.Select(Strings.SpeechModelUnloadName).ToArray();
+            Assert.All(names, name => Assert.False(string.IsNullOrWhiteSpace(name)));
+            Assert.Equal(names.Length, names.Distinct().Count());
+        }
+
+        // A choice without its own text would show the enum name in both languages
+        [Fact]
+        public void ModelUnloadChoices_AreTranslated()
+        {
+            foreach (ModelUnloadTimeout choice in Enum.GetValues<ModelUnloadTimeout>())
+            {
+                Strings.Language = UiLanguage.English;
+                string english = Strings.SpeechModelUnloadName(choice);
+                Strings.Language = UiLanguage.Ukrainian;
+                Assert.NotEqual(english, Strings.SpeechModelUnloadName(choice));
+            }
+        }
+
+        [Theory]
         [InlineData(UiLanguage.English, 874_200_000, "874 MB")]
         [InlineData(UiLanguage.English, 1_624_600_000, "1.6 GB")]
         [InlineData(UiLanguage.Ukrainian, 573_600_000, "574 МБ")]

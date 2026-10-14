@@ -11,9 +11,11 @@ namespace MovaCore.Services
     /// <summary>
     /// Hold-to-talk dictation: the hotkey press starts recording (and loads the model meanwhile), the release stops it,
     /// voice activity detection keeps the speech, and the recognized text is pasted into the focused application. The
-    /// microphone stays open for a while after a dictation, so that the next one starts at once. Hotkey events arrive
-    /// on the hook thread, which must not block, so every event becomes a command processed in order by one worker
-    /// loop; transcription runs beside the loop so that a cancellation is handled at once.
+    /// microphone stays open for a while after a dictation, so that the next one starts at once; the model stays loaded
+    /// for as long as the settings say (as in Handy, 5 minutes by default) and is loaded again at the next press, while
+    /// the user speaks. Hotkey events arrive on the hook thread, which must not block, so every event becomes a command
+    /// processed in order by one worker loop; transcription runs beside the loop so that a cancellation is handled at
+    /// once.
     /// </summary>
     public sealed class SpeechOrchestrator : IDisposable
     {
@@ -28,6 +30,7 @@ namespace MovaCore.Services
         private readonly Task _loop;
         private volatile SpeechSettings _settings = SpeechSettings.Disabled;
         private volatile SpeechState _state = SpeechState.Idle;
+        private (string? Path, bool Gpu)? _configuredModel; // the model Configure last applied; only a new one is preloaded
 
         // Owned by the loop
         private int _generation; // identifies the current dictation; a cancelled one's late results are ignored
@@ -39,6 +42,7 @@ namespace MovaCore.Services
         private bool _finishing; // released; the last moments are still being recorded
         private bool _ignoreNextRelease;
         private int _closeTicket; // identifies the pending close of the microphone; a press makes it stale
+        private int _unloadTicket; // identifies the pending unload of the model; a press makes it stale
         private bool _detectorFailed;
 
         /// <param name="detector">Voice activity detection; without it, an energy threshold decides what is silence.</param>
@@ -95,25 +99,34 @@ namespace MovaCore.Services
         internal TimeSpan NoticeableHold { get; init; } = TimeSpan.FromSeconds(1);
 
         /// <summary>
-        /// Applies the settings. With dictation on and the model on disk, the model is loaded right away and stays
-        /// loaded, so that no dictation waits for it. With dictation off, or the model gone (deleted), its memory is
-        /// freed.
+        /// Applies the settings; called on one thread (the UI thread). With dictation on and the model on disk, a newly
+        /// chosen model (or the first one, at startup) is loaded right away, so that the next dictation does not wait for
+        /// it; it is freed again once it has not been used for <see cref="SpeechSettings.UnloadAfter"/>. With dictation
+        /// off, or the model gone (deleted), its memory is freed at once.
         /// </summary>
         public void Configure(SpeechSettings settings)
         {
             _settings = settings;
             if (!settings.Enabled)
             {
+                _configuredModel = null;
                 Cancel();
                 Post(new CloseMicrophone(null));
                 Post(new UnloadRequested());
             }
             else if (SpeechModelFile.Check(settings.ModelPath) == SpeechModelFormat.Ggml)
             {
-                Post(new PreloadRequested(new SpeechOptions(settings.ModelPath!, settings.Language, settings.UseGpu)));
+                // Saving unrelated settings does not bring back a model freed for being idle; a model freed after every
+                // dictation is never loaded ahead of time
+                (string?, bool) model = (settings.ModelPath, settings.UseGpu);
+                if (_configuredModel != model && settings.UnloadAfter != TimeSpan.Zero)
+                    Post(new PreloadRequested(new SpeechOptions(settings.ModelPath!, settings.Language, settings.UseGpu)));
+                _configuredModel = model;
+                Post(new UnloadPolicyChanged());
             }
             else
             {
+                _configuredModel = null;
                 Post(new UnloadRequested());
             }
         }
@@ -178,6 +191,13 @@ namespace MovaCore.Services
                     _ = PreloadAsync(preload.Options, generation: null);
                     break;
                 case UnloadRequested:
+                    _unloadTicket++;
+                    _ = UnloadAsync();
+                    break;
+                case UnloadPolicyChanged when _state == SpeechState.Idle:
+                    ScheduleUnload();
+                    break;
+                case UnloadIdle idle when idle.Ticket == _unloadTicket && _state == SpeechState.Idle:
                     _ = UnloadAsync();
                     break;
             }
@@ -190,6 +210,7 @@ namespace MovaCore.Services
             if (_state != SpeechState.Idle) return;
             _ignoreNextRelease = false;
             _closeTicket++; // the microphone is needed again
+            _unloadTicket++; // and so is the model
 
             SpeechSettings settings = _settings;
             if (!settings.Enabled) return;
@@ -500,6 +521,24 @@ namespace MovaCore.Services
         {
             SetState(new SpeechStateChangedEventArgs(SpeechState.Idle, outcome, error, detail));
             if (_recorder.IsOpen) ScheduleClose();
+            ScheduleUnload();
+        }
+
+        // The model takes hundreds of megabytes (on the graphics card with the GPU option), which games and other
+        // applications may need: it is freed once dictation has not used it for a while (Handy does the same)
+        private void ScheduleUnload()
+        {
+            int ticket = ++_unloadTicket;
+            TimeSpan? delay = _settings.UnloadAfter;
+            if (delay == null) return;
+            if (delay <= TimeSpan.Zero)
+            {
+                _ = UnloadAsync();
+                return;
+            }
+            _ = Task.Delay(delay.Value, _disposeCts.Token).ContinueWith(
+                t => Post(new UnloadIdle(ticket)), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion,
+                TaskScheduler.Default);
         }
 
         private void ScheduleClose()
@@ -549,5 +588,7 @@ namespace MovaCore.Services
         private sealed record WorkDone(int Generation, SpeechOutcome Outcome, SpeechError? Error, string? Detail) : Command;
         private sealed record PreloadRequested(SpeechOptions Options) : Command;
         private sealed record UnloadRequested : Command;
+        private sealed record UnloadPolicyChanged : Command;
+        private sealed record UnloadIdle(int Ticket) : Command;
     }
 }
