@@ -93,14 +93,25 @@ namespace MovaCore.Tests
             Assert.False(_manager.IsDownloaded(_model));
         }
 
+        // The second Start comes while the first download is really running (its request has arrived): a fixed pause
+        // was too short on a busy machine, and a second Start right away would cancel the first before any request
         [Fact]
         public async Task StartingTheSameModelTwice_DownloadsOnce()
         {
-            _http.Route(Url, _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new StallingStream()) });
+            int requests = 0;
+            var first = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var second = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _http.Route(Url, _ =>
+            {
+                (Interlocked.Increment(ref requests) == 1 ? first : second).TrySetResult();
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new StallingStream()) };
+            });
 
             _manager.Start(_model);
+            await first.Task.WaitAsync(TimeSpan.FromSeconds(5));
             _manager.Start(_model);
-            await Task.Delay(100);
+            // A second download, which must not start, would send its request within moments
+            await Task.WhenAny(second.Task, Task.Delay(200));
             _manager.Cancel();
             await _manager.WhenIdleAsync();
 
