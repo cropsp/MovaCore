@@ -70,6 +70,50 @@ namespace MovaCore.Tests
             Assert.Equal(expected, TranscriptText.Clean(new[] { recognized }));
         }
 
+        [Theory]
+        [InlineData("Привіт, як справи? Привіт, як справи? Привіт, як справи?", "Привіт, як справи?")]
+        [InlineData("Я йду додому. Я йду додому.", "Я йду додому.")]
+        [InlineData("я йду додому я йду додому.", "я йду додому.")]
+        [InlineData("Купи хліб. Купи хліб і молоко. Купи хліб і молоко.", "Купи хліб. Купи хліб і молоко.")]
+        [InlineData("Добре, зроблю це завтра зранку зроблю це завтра зранку", "Добре, зроблю це завтра зранку")]
+        public void PhrasesRepeatedRightAfterThemselves_AreKeptOnce(string recognized, string expected) =>
+            Assert.Equal(expected, TranscriptText.Clean(new[] { recognized }));
+
+        [Fact]
+        public void RepeatedSegments_AreKeptOnce() =>
+            Assert.Equal("Купи хліб і молоко.", TranscriptText.Clean(new[] { "Купи хліб і молоко.", " Купи хліб і молоко." }));
+
+        // Whisper starting over in a part of its own, cut short by the token ceiling or not
+        [Theory]
+        [InlineData(new[] { " Купи хліб і молоко.", " Купи хліб" }, "Купи хліб і молоко.")]
+        [InlineData(new[] { " Купи хліб і молоко.", " Купи" }, "Купи хліб і молоко.")]
+        [InlineData(new[] { " Привіт, як справи?", " привіт як" }, "Привіт, як справи?")]
+        [InlineData(new[] { " «Привіт», — сказав він.", " Привіт, сказав" }, "«Привіт», — сказав він.")]
+        [InlineData(new[] { " Привіт.", " Як справи?", " Як справи?" }, "Привіт. Як справи?")]
+        [InlineData(new[] { " Привіт.", " Як справи?", " Привіт. Як справи?" }, "Привіт. Як справи?")]
+        [InlineData(new[] { " Купи хліб і молоко.", " Купи хліб і молоко.", " Купи хліб" }, "Купи хліб і молоко.")]
+        [InlineData(new[] { " Купи хліб і молоко.", " [BLANK_AUDIO]", " Купи хліб" }, "Купи хліб і молоко.")]
+        public void PartsStartingOver_AreDropped(string[] parts, string expected) =>
+            Assert.Equal(expected, TranscriptText.Clean(parts));
+
+        [Theory]
+        [InlineData(new[] { " Купи хліб.", " Купи також молоко." }, "Купи хліб. Купи також молоко.")]
+        [InlineData(new[] { " Перше речення.", " Друге речення." }, "Перше речення. Друге речення.")]
+        [InlineData(new[] { " Так.", " Так, я згоден." }, "Так. Так, я згоден.")]
+        [InlineData(new[] { " Купи хліб.", " Купи хліб і молоко." }, "Купи хліб. Купи хліб і молоко.")]
+        [InlineData(new[] { " Я прийду завтра.", " Завтра буде пізно." }, "Я прийду завтра. Завтра буде пізно.")]
+        public void PartsGoingOn_AreKept(string[] parts, string expected) =>
+            Assert.Equal(expected, TranscriptText.Clean(parts));
+
+        [Theory]
+        [InlineData("Так, так.")]
+        [InlineData("Це дуже дуже добре.")]
+        [InlineData("ну давай ну давай, починаємо")]
+        [InlineData("Я йду додому. Я йду в магазин.")]
+        [InlineData("Він сказав: я прийду, я прийду завтра.")]
+        public void OrdinaryRepetition_IsKept(string recognized) =>
+            Assert.Equal(recognized, TranscriptText.Clean(new[] { recognized }));
+
         [Fact]
         public void OnlyHesitations_GiveEmptyText()
         {

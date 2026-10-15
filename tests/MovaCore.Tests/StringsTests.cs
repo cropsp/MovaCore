@@ -104,7 +104,8 @@ namespace MovaCore.Tests
             Assert.Contains("the reason", Strings.BalloonHookFailed("the reason"));
             Assert.Contains("the reason", Strings.BalloonUnexpectedError("the reason"));
             Assert.Contains("the reason", Strings.SettingsNotSaved("the reason"));
-            Assert.Contains("1.2.3", Strings.AboutText("1.2.3"));
+            Assert.Contains("1.2.3", Strings.AboutText("1.2.3", "the build"));
+            Assert.Contains("the build", Strings.AboutText("1.2.3", "the build"));
             Assert.Contains("ScrollLock", Strings.BalloonModelReady("ScrollLock"));
             Assert.Contains("the reason", Strings.BalloonModelDownloadFailed("the reason"));
             Assert.Contains("the reason", Strings.SpeechModelDownloadFailed("the reason"));
@@ -112,6 +113,17 @@ namespace MovaCore.Tests
             Assert.Contains("42", Strings.TrayTooltipDownloading(42));
             Assert.Contains("42", Strings.SpeechModelStillDownloading(42));
             Assert.Contains("the detail", Strings.SpeechErrorText(SpeechError.Failed, "the detail"));
+            Assert.Contains("F10", Strings.HintNothingSelected("F10"));
+            Assert.Contains("F10", Strings.FirstStepsConversionText("F10"));
+            Assert.Contains("F10", Strings.FirstStepsConversionDone("F10"));
+            Assert.Contains("ScrollLock", Strings.FirstStepsVoiceOn("ScrollLock"));
+            Assert.Contains("874", Strings.FirstStepsVoiceText("874 MB"));
+            Assert.Contains("ScrollLock", Strings.SpeechHotkeyPrompt("ScrollLock"));
+            Assert.Contains("the reason", Strings.RestartFailed("the reason"));
+            foreach (RecognitionAdvice advice in Enum.GetValues<RecognitionAdvice>())
+            {
+                if (advice != RecognitionAdvice.None) Assert.NotEmpty(Strings.RecognitionAdviceText(advice));
+            }
 
             string downloading = Strings.SpeechModelDownloading("312 MB", "874 MB", 35);
             Assert.Contains("312 MB", downloading);
@@ -203,6 +215,35 @@ namespace MovaCore.Tests
             Strings.Language = language;
 
             Assert.Equal(expected, Strings.FormatSize(bytes));
+        }
+
+        // A discrete card's memory as Vulkan reports it: an 8 GB card has a little less than 8 GiB for itself
+        [Theory]
+        [InlineData(UiLanguage.English, true, 7.6, "NVIDIA GeForce RTX 4060 (8 GB)")]
+        [InlineData(UiLanguage.Ukrainian, true, 1.9, "NVIDIA GeForce RTX 4060 (2 ГБ)")]
+        [InlineData(UiLanguage.English, true, 0.0, "NVIDIA GeForce RTX 4060")]
+        [InlineData(UiLanguage.English, false, 15.7, "NVIDIA GeForce RTX 4060 (integrated)")]
+        [InlineData(UiLanguage.Ukrainian, false, 15.7, "NVIDIA GeForce RTX 4060 (вбудована)")]
+        public void GpuName_GivesMemoryOrIntegrated(UiLanguage language, bool discrete, double gibibytes, string expected)
+        {
+            Strings.Language = language;
+
+            var gpu = new GpuDevice(0, "NVIDIA GeForce RTX 4060", discrete, (ulong)(gibibytes * (1UL << 30)));
+            Assert.Equal(expected, Strings.SpeechGpuName(gpu));
+        }
+
+        [Fact]
+        public void BuildLabel_NamesTheCiBuildOrALocalOne()
+        {
+            Strings.Language = UiLanguage.English;
+
+            Assert.Equal("Build 57 · 265ab8d · 2026-10-07", Strings.BuildLabel("57", "265ab8d", "2026-10-07"));
+            Assert.Equal("Build 57 · 2026-10-07", Strings.BuildLabel("57", "", "2026-10-07"));
+            Assert.Equal("Local build · 2026-10-07", Strings.BuildLabel("", "", "2026-10-07"));
+
+            Strings.Language = UiLanguage.Ukrainian;
+            Assert.Equal("Збірка 57 · 265ab8d · 2026-10-07", Strings.BuildLabel("57", "265ab8d", "2026-10-07"));
+            Assert.Equal("Локальна збірка · 2026-10-07", Strings.BuildLabel("", "", "2026-10-07"));
         }
 
         [Fact]

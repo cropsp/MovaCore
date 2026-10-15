@@ -57,9 +57,6 @@ namespace MovaCore.UI
             /// <summary>Transcription takes a moment: an amber wave through the grass; the mouse gnaws an ear of wheat.</summary>
             Working,
 
-            /// <summary>The text was pasted: a wink.</summary>
-            Pasted,
-
             /// <summary>No speech was heard: the mouse tilts its head.</summary>
             Puzzled,
 
@@ -74,7 +71,6 @@ namespace MovaCore.UI
         {
             Open,
             Closed,
-            Wink,
         }
 
         /// <summary>Short grass and a resting mouse, as at the start of a recording.</summary>
@@ -131,8 +127,7 @@ namespace MovaCore.UI
 
             // The mouse stays where it is: at most a slight lift with the voice
             float rise = pose == Pose.Listening ? Math.Min(1, _peek * 1.6f) * MaxRise : 0;
-            float hop = pose == Pose.Pasted ? MathF.Abs(MathF.Sin(t / 150)) * 2 : 0;
-            float hx = MouseX, hy = MouseY - rise - hop;
+            float hx = MouseX, hy = MouseY - rise;
             Union(g, pal, pal.Body, new RectangleF(hx - 20, hy + 2.5f, 24, 19));
             Fill(g, pal.Belly, hx - 2.5f, hy + 14, 6, 6.5f);
             Head(g, hx, hy, 0.95f, pal, pose, t);
@@ -150,7 +145,6 @@ namespace MovaCore.UI
             Tuft(g, hx + 7, baseY, 8, 1, grass.Front, grass.Edge, frontSway);
 
             if (asleep) Zzz(g, hx + 11, hy - 12, t);
-            if (pose == Pose.Pasted) Sparkle(g, Width - 28, 14, t);
             if (recordingDot && pose == Pose.Listening)
             {
                 int alpha = (int)(255 * (0.65 + 0.35 * Math.Sin(t / 260)));
@@ -184,7 +178,7 @@ namespace MovaCore.UI
             float chew = pose == Pose.Working ? 0.5f + 0.5f * MathF.Sin(t / 70) : 0;
             if (chew > 0) Fill(g, pal.Belly, 3.4f, 5.2f, 2.5f + chew * 1.5f, 2 + chew * 0.9f);
 
-            Eye eye = pose switch { Pose.Asleep => Eye.Closed, Pose.Pasted => Eye.Wink, _ => Eye.Open };
+            Eye eye = pose == Pose.Asleep ? Eye.Closed : Eye.Open;
             DrawEye(g, 3.6f, -1.4f, eye, pal);
             Fill(g, pal.Line, 13.4f, 1.9f, 1.75f, 1.35f);
 
@@ -216,11 +210,7 @@ namespace MovaCore.UI
                 Fill(g, Color.White, x + 0.65f, y - 0.75f, 0.62f, 0.62f);
                 return;
             }
-            Pen line = Pen(pal.Line, LineWidth);
-            if (eye == Eye.Closed)
-                Quad(g, line, new PointF(x - 1.9f, y - 0.2f), new PointF(x, y + 1.7f), new PointF(x + 1.9f, y - 0.2f));
-            else
-                Quad(g, line, new PointF(x - 1.9f, y + 0.7f), new PointF(x, y - 1.6f), new PointF(x + 1.9f, y + 0.7f));
+            Quad(g, Pen(pal.Line, LineWidth), new PointF(x - 1.9f, y - 0.2f), new PointF(x, y + 1.7f), new PointF(x + 1.9f, y - 0.2f));
         }
 
         private void Paw(Graphics g, float x, float y, float scale, Palette pal, float radians)
@@ -313,20 +303,6 @@ namespace MovaCore.UI
                 g.DrawString("z", _letterFont, Brush(Color.FromArgb((int)((1 - p) * 230), Text)), 0, -8);
                 g.Restore(state);
             }
-        }
-
-        private void Sparkle(Graphics g, float x, float y, float t)
-        {
-            float size = 3 + 1.2f * MathF.Sin(t / 120);
-            float turn = t / 900;
-            Span<PointF> points = stackalloc PointF[8];
-            for (int i = 0; i < 8; i++)
-            {
-                float r = i % 2 == 0 ? size : size * 0.32f;
-                float a = turn + i / 8f * MathF.Tau;
-                points[i] = new PointF(x + MathF.Cos(a) * r, y + MathF.Sin(a) * r);
-            }
-            g.FillPolygon(Brush(Amber), points.ToArray());
         }
 
         // ---- Drawing helpers ---------------------------------------------------------------------------

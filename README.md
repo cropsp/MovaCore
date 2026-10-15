@@ -34,13 +34,14 @@
 the other layout and switches your keyboard to that language, so you can just keep typing. It works both ways
 (`Руддщ` → `Hello`) and in almost any app.
 
-**Type with your voice.** Hold **ScrollLock**, speak, and let go. Whisper recognizes your speech on your own computer,
-and the text appears where the cursor is. Nothing you say leaves your PC. [Set it up](#voice-input).
+**Type with your voice.** Hold the dictation key (**ScrollLock** by default; pick any key you have in Settings →
+Voice), speak, and let go. Whisper recognizes your speech on your own computer, and the text appears where the cursor
+is. Nothing you say leaves your PC. [Set it up](#voice-input).
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/media/mouse-in-grass-dark.gif">
-    <img src="docs/media/mouse-in-grass-light.gif" width="420" alt="The dictation indicator: a field mouse dozes until the microphone is ready, sits in grass that grows with your voice, gnaws an ear of wheat while the speech is recognized and winks when the text is pasted">
+    <img src="docs/media/mouse-in-grass-light.gif" width="420" alt="The dictation indicator: a field mouse dozes until the microphone is ready, sits in grass that grows with your voice, gnaws an ear of wheat while the speech is recognized and fades out as the text is pasted">
   </picture>
 </p>
 
@@ -52,7 +53,9 @@ You need Windows 10 or 11. There is nothing to install: no installer, no adminis
    (`win-arm64` for ARM devices).
 2. Extract the whole archive into a folder of your choice, for example `Documents\MovaCore`, and run `MovaCore.exe`.
    Keep the other files next to it.
-3. A mouse icon appears in the system tray. Select some text and press **F10**.
+3. A mouse icon appears in the system tray, and the **First steps** window opens: try the hotkey on a word, turn on
+   voice input with a dictation key of your own, and see how to keep the mouse in sight. Then select some text
+   anywhere and press **F10**.
 
 > [!NOTE]
 > The first time, Windows may say "Windows protected your PC". Choose **More info**, then **Run anyway**. SmartScreen
@@ -60,15 +63,19 @@ You need Windows 10 or 11. There is nothing to install: no installer, no adminis
 > [code signing policy](docs/CODE_SIGNING.md)). Each release lists the SHA-256 checksums of its files in
 > `SHA256SUMS.txt`.
 
-Right-click the tray icon for **Settings**, **Pause**, **About** and **Exit**; double-clicking it opens Settings. To
-start MovaCore with Windows, turn on **Launch at Windows startup** in Settings → General.
+Right-click the tray icon for **Settings**, **Last phrases** (with voice input on), **Pause**, **First steps**, **About**
+and **Exit**; double-clicking it opens Settings. **Launch at Windows startup** is suggested in First steps, and can be changed in Settings → General.
 
 ## Voice input
 
-1. In Settings → Voice, turn on **Voice input** and press **Save**. MovaCore downloads the speech model (874 MB) in the
-   background, and the tray icon's tooltip shows the progress.
-2. Click where the text should go, **hold ScrollLock**, speak, and let go.
-3. The text appears at the cursor, and whatever you had copied is put back on the clipboard.
+1. In **First steps** press **Turn on**, or in Settings → Voice turn on **Voice input**. MovaCore asks you to press the
+   key you will hold while dictating (Esc keeps ScrollLock, which compact keyboards often lack) and downloads the
+   speech model (874 MB) in the background; the tray icon's tooltip shows the progress. In Settings, press **Save**.
+2. Click where the text should go, **hold the dictation key**, speak, and let go.
+3. The text appears at the cursor, and whatever you had copied is put back on the clipboard. If it could not be
+   pasted (no text field had the focus), it stays on the clipboard; the last 10 phrases are also in the tray menu,
+   **Last phrases**, where a click copies one again. You can press the key again at once: the next phrase is
+   recorded while the previous one is still being pasted.
 
 While you hold the key, the tray icon shows a red dot, and a small indicator at the bottom of the screen shows the
 mouse in grass that grows with your voice. If the grass is grey and the mouse is dozing, the microphone is still
@@ -80,8 +87,13 @@ starting: wait until the grass turns green.
 - **Models.** The default is Whisper Large v3 Turbo q8_0 (874 MB). On the Voice tab you can pick the full-precision
   model (1.6 GB, best with a graphics card), a smaller one (574 MB) for slower computers, or your own whisper.cpp
   model file (`ggml-*.bin`; GGUF files are not supported). A downloaded model can be deleted there to free disk space.
-- **Speed.** On x64, **Use the graphics card (Vulkan)** makes recognition much faster (it takes effect after a
-  restart). Without it, recognition runs on the processor, which needs AVX2 (most x64 processors made since 2013).
+- **Speed.** On x64, a graphics card makes recognition much faster. **Graphics card** on the Voice tab is
+  **Automatic** by default, which prefers a separate graphics card to one built into the processor; you can pick a card
+  yourself, or **Processor only** (switching from it to a card takes effect after a restart, which MovaCore offers). If
+  recognition is slow, MovaCore says once what could help. On the processor,
+  recognition needs AVX2 (most x64 processors made since 2013).
+  **Faster recognition of short phrases** (experimental, on by default) makes Whisper process only as much audio as
+  the phrase takes instead of 30 seconds; turn it off if phrases come out worse.
 - **Language.** Whisper detects it automatically, or you can pick Ukrainian, English or another language.
 - **Continuing a phrase.** If you dictate again right away, without typing or clicking in between, MovaCore adds a
   space and starts with a small letter when the sentence was not finished. After you type or click, it cannot know
@@ -90,7 +102,8 @@ starting: wait until the grass turns green.
   Windows shows the microphone as in use, and a Bluetooth headset stays in its lower-quality headset mode.
 - **Memory.** The model takes at least as much memory as its file (about 1 GB by default), on the graphics card if
   you use it. MovaCore unloads it 5 minutes after the last dictation, so games and other programs get that memory
-  back; the next dictation loads it again while you speak. Choose another time, or **Never**, under **Unload the model from memory** on the Voice tab.
+  back; the next dictation loads it again while you speak. Choose another time, or **Never**, under **Unload the model
+  from memory** in Settings → General.
 - **The hotkey** can be changed on the Voice tab.
 
 </details>
@@ -113,7 +126,10 @@ starting: wait until the grass turns green.
 
 - MovaCore watches the keyboard only to notice its hotkeys. It does not record or store what you type, and it reads
   the selected text only when you press the hotkey.
-- Speech is recognized on your computer. Audio and recognized text are never saved or sent anywhere.
+- Speech is recognized on your computer. Audio is never saved or sent anywhere. Recognized text is never sent either:
+  the last 10 phrases stay in memory for the tray menu's **Last phrases** until MovaCore exits, and go to a file
+  (`%LOCALAPPDATA%\MovaCore\history.json`) only if you turn on **Remember the last dictated phrases after a restart**
+  in Settings → General. Turning it off deletes the file.
 - There is no telemetry and no account. The only network connection is the speech model download from
   huggingface.co, after you turn voice input on.
 - Settings are stored in `%APPDATA%\MovaCore\settings.json`, downloaded models in `%LOCALAPPDATA%\MovaCore\models`,
@@ -169,10 +185,11 @@ Windows lets desktop apps use the microphone (Windows Settings → Privacy & sec
 <details>
 <summary>Voice input is slow</summary>
 
-On x64, turn on **Use the graphics card (Vulkan)** on the Voice tab and restart MovaCore. Otherwise, choose the smaller
-model. Right after MovaCore starts, loading the model takes a few seconds. The model is also loaded again after it has
-been unloaded for lack of use (after 5 minutes by default): for a short phrase, that can add a moment. Choose a longer
-time, or **Never**, under **Unload the model from memory** on the Voice tab.
+On x64, check that **Graphics card** on the Voice tab is not set to **Processor only** (after changing it, let MovaCore
+restart). On a laptop with an NVIDIA or AMD card that is not in the list, install that card's driver. Otherwise, choose
+the smaller model. Right after MovaCore starts, loading the model takes a few seconds. The model is also loaded again
+after it has been unloaded for lack of use (after 5 minutes by default): for a short phrase, that can add a moment.
+Choose a longer time, or **Never**, under **Unload the model from memory** in Settings → General.
 
 </details>
 

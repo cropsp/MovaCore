@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -23,8 +24,11 @@ namespace MovaCore
 
             AppLog.Initialize(Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MovaCore", "logs"));
-            AppLog.Info($"MovaCore {typeof(Program).Assembly.GetName().Version} starting on " +
-                $"{RuntimeInformation.OSDescription} ({RuntimeInformation.ProcessArchitecture})" +
+            // Testers run many builds of one version: the log says which one wrote it
+            string build = BuildInfo.Number.Length == 0 ? "local build"
+                : $"build {BuildInfo.Number}, {BuildInfo.Commit}";
+            AppLog.Info($"MovaCore {Strings.FormatVersion(typeof(Program).Assembly.GetName().Version)} ({build}, " +
+                $"{BuildInfo.Date}) starting on {RuntimeInformation.OSDescription} ({RuntimeInformation.ProcessArchitecture})" +
                 (smokeTest ? ", smoke test" : ""));
             RegisterExceptionHandlers(smokeTest);
 
@@ -33,6 +37,9 @@ namespace MovaCore
 
             // Until the settings are loaded, messages follow the Windows display language
             Strings.Language = WindowsLanguage.Resolve(UiLanguage.Auto);
+
+            // A restart (TrayApplicationContext.Restart) starts this copy while the old one is still exiting
+            if (int.TryParse(ArgumentValue(args, "--restarted-from"), out int previousProcess)) WaitForExit(previousProcess);
 
             // Only one instance per user session: a second tray icon would be confusing,
             // and both instances would overwrite each other's settings.
@@ -76,13 +83,18 @@ namespace MovaCore
             using var recognizer = new WhisperSpeechRecognizer();
             using var dictationTarget = new WindowsDictationTarget(hotkeys);
             using var dictationContext = new DictationContext(dictationTarget);
+            // Local, not roaming: the phrases stay on this computer
+            var history = new DictationHistory(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MovaCore", "history.json"));
             using var speech = new SpeechOrchestrator(
-                recorder, recognizer, new TextPaster(hotkeys, clipboard, clipboardGate), recognizer, dictationContext);
+                recorder, recognizer, new TextPaster(hotkeys, clipboard, clipboardGate), recognizer, dictationContext, history);
             using var downloader = new ModelDownloader();
             using var downloads = new ModelDownloadManager(downloader, SpeechModelCatalog.DefaultModelsDirectory);
             var settings = new SettingsService(new StartupRegistration());
-            using var context = new TrayApplicationContext(hotkeys, orchestrator, settings, speech, recorder, downloads);
+            using var context = new TrayApplicationContext(
+                hotkeys, orchestrator, settings, speech, recorder, downloads, history, clipboard);
 
+            if (!smokeTest && settings.IsFirstRun) context.ShowFirstStepsSoon();
             if (smokeTest)
             {
                 SmokeTest.Schedule(
@@ -104,6 +116,19 @@ namespace MovaCore
         {
             int index = Array.IndexOf(args, name);
             return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+        }
+
+        private static void WaitForExit(int processId)
+        {
+            try
+            {
+                using var process = Process.GetProcessById(processId);
+                if (!process.WaitForExit(TimeSpan.FromSeconds(15))) AppLog.Info("The previous MovaCore is still running");
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            {
+                // Gone already
+            }
         }
 
         private static void RegisterExceptionHandlers(bool smokeTest)

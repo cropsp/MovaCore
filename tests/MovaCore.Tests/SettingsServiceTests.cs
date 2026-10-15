@@ -41,6 +41,49 @@ namespace MovaCore.Tests
         }
 
         [Fact]
+        public void IsFirstRun_UntilTheSettingsAreSaved()
+        {
+            SettingsService service = CreateService();
+
+            service.Load();
+            Assert.True(service.IsFirstRun);
+
+            service.Save(new AppSettings());
+            Assert.False(service.IsFirstRun);
+
+            SettingsService nextStart = CreateService();
+            nextStart.Load();
+            Assert.False(nextStart.IsFirstRun);
+        }
+
+        // Settings that cannot be read are reset, but MovaCore has been set up before: no first steps again
+        [Fact]
+        public void IsFirstRun_NotWithAnUnreadableFile()
+        {
+            WriteSettingsFile("{ not json");
+            SettingsService service = CreateService();
+
+            service.Load();
+
+            Assert.False(service.IsFirstRun);
+        }
+
+        [Fact]
+        public void Clone_IsIndependent()
+        {
+            var settings = new AppSettings { SpeechEnabled = true, ExcludedProcesses = { "code" } };
+
+            AppSettings copy = settings.Clone();
+            copy.SpeechEnabled = false;
+            copy.ExcludedProcesses.Add("devenv");
+
+            Assert.True(settings.SpeechEnabled);
+            Assert.Equal(new[] { "code" }, settings.ExcludedProcesses);
+            Assert.Equal(new[] { "code", "devenv" }, copy.ExcludedProcesses);
+            Assert.Equal(settings.SpeechHotkey, copy.SpeechHotkey);
+        }
+
+        [Fact]
         public void Save_ThenLoad_RoundTrips()
         {
             SettingsService service = CreateService();

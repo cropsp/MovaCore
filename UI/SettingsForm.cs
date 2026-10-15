@@ -9,16 +9,14 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using MovaCore.Models;
 using MovaCore.Services;
+using static MovaCore.UI.FormLayout;
 
 namespace MovaCore.UI
 {
     public class SettingsForm : Form
     {
-        // Sizes are in pixels at 96 DPI: AutoScaleMode.Dpi scales them to the monitor's DPI
-        private const int ContentWidth = 430; // inner width of a group; longer texts wrap instead of widening the form
+        // Sizes are in pixels at 96 DPI (see FormLayout)
         private const int ComboWidth = 220;
-        private const int ButtonMinWidth = 96;
-        private const int ButtonMinHeight = 30;
         private const int ExcludedBoxHeight = 72; // about four lines
         private const string ModelsPageUrl = "https://huggingface.co/ggerganov/whisper.cpp/tree/main";
 
@@ -36,6 +34,7 @@ namespace MovaCore.UI
         private readonly Func<CancellationToken, Task<Hotkey?>> _captureHotkey;
         private readonly ModelDownloadManager _downloads;
         private readonly List<string?> _microphoneIds = new(); // per item of _microphoneComboBox; null = Windows default
+        private readonly List<(bool UseGpu, string? Name)> _gpuChoices = new(); // per item of _gpuComboBox; null = automatic
         private readonly CancellationTokenSource _captureCts = new();
         private readonly ToolTip _toolTip = new();
         private readonly Font _titleFont = new("Segoe UI", 11F, FontStyle.Bold);
@@ -66,9 +65,11 @@ namespace MovaCore.UI
         private readonly LinkLabel _whereToGetLink = new();
         private readonly ComboBox _speechLanguageComboBox = new();
         private readonly ComboBox _microphoneComboBox = new();
-        private readonly CheckBox _useGpuCheckBox = new();
-        private readonly ComboBox _modelUnloadComboBox = new();
+        private readonly ComboBox _gpuComboBox = new();
+        private readonly CheckBox _fastRecognitionCheckBox = new();
         private readonly CheckBox _overlayCheckBox = new();
+        private readonly CheckBox _historyCheckBox = new();
+        private readonly ComboBox _modelUnloadComboBox = new();
         private readonly Button _saveButton = new();
         private readonly Button _cancelButton = new();
 
@@ -81,25 +82,27 @@ namespace MovaCore.UI
         /// global hook would otherwise swallow the current trigger while the user is trying to change it.
         /// </param>
         /// <param name="microphones">The microphones to offer.</param>
+        /// <param name="gpus">The graphics cards to offer.</param>
         /// <param name="downloads">Shows and controls the download of the speech model.</param>
         public SettingsForm(
             AppSettings currentSettings,
             Func<CancellationToken, Task<Hotkey?>> captureHotkey,
             IReadOnlyList<AudioInputDevice> microphones,
+            IReadOnlyList<GpuDevice> gpus,
             ModelDownloadManager downloads)
         {
             _settings = currentSettings;
             _captureHotkey = captureHotkey;
             _downloads = downloads;
             _customModelPath = currentSettings.SpeechCustomModelPath;
-            InitializeComponent(microphones);
+            InitializeComponent(microphones, gpus);
             _downloads.StateChanged += OnDownloadStateChanged;
         }
 
         /// <summary>For the smoke test, which shows every page.</summary>
         internal TabControl Tabs => _tabs;
 
-        private void InitializeComponent(IReadOnlyList<AudioInputDevice> microphones)
+        private void InitializeComponent(IReadOnlyList<AudioInputDevice> microphones, IReadOnlyList<GpuDevice> gpus)
         {
             // The panels below size themselves from their content, so longer (translated) texts and larger
             // fonts never get clipped, and the form follows
@@ -122,7 +125,7 @@ namespace MovaCore.UI
             _toolTip.AutoPopDelay = 10000;
 
             AddPage(Strings.TabLayout, CreateHotkeyGroup(), CreateConversionGroup());
-            AddPage(Strings.TabVoice, CreateVoicePage(microphones));
+            AddPage(Strings.TabVoice, CreateVoicePage(microphones, gpus));
             AddPage(Strings.TabGeneral, CreateGeneralGroup(), CreateExcludedGroup());
             _tabs.Margin = new Padding(0, 0, 0, 10);
 
@@ -232,9 +235,21 @@ namespace MovaCore.UI
                 Text = "MovaCore " + Strings.FormatVersion(typeof(SettingsForm).Assembly.GetName().Version),
                 Font = _titleFont,
                 AutoSize = true,
-                Anchor = AnchorStyles.Left,
                 Margin = Padding.Empty,
             };
+            // Testers run many builds of one version: which one this is
+            var build = new Label
+            {
+                Text = Strings.BuildLabel(BuildInfo.Number, BuildInfo.Commit, BuildInfo.Date),
+                AutoSize = true,
+                ForeColor = SystemColors.GrayText,
+                Margin = new Padding(0, 2, 0, 0),
+            };
+            TableLayoutPanel titles = CreatePanel(new ColumnStyle(SizeType.AutoSize));
+            titles.Dock = DockStyle.None;
+            titles.Anchor = AnchorStyles.Left;
+            AddRow(titles, title);
+            AddRow(titles, build);
 
             TableLayoutPanel header = CreatePanel(new ColumnStyle(SizeType.AutoSize), new ColumnStyle(SizeType.AutoSize));
             header.Dock = DockStyle.None;
@@ -243,7 +258,7 @@ namespace MovaCore.UI
             header.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             header.RowCount = 1;
             header.Controls.Add(_logoBox, 0, 0);
-            header.Controls.Add(title, 1, 0);
+            header.Controls.Add(titles, 1, 0);
             return header;
         }
 
@@ -282,23 +297,69 @@ namespace MovaCore.UI
                 _convertLastWordCheckBox);
         }
 
-        private Control CreateVoicePage(IReadOnlyList<AudioInputDevice> microphones)
+        private Control CreateVoicePage(IReadOnlyList<AudioInputDevice> microphones, IReadOnlyList<GpuDevice> gpus)
         {
             ConfigureCheckBox(_speechEnabledCheckBox, Strings.SpeechEnable, _settings.SpeechEnabled);
             _speechEnabledCheckBox.Margin = new Padding(3, 3, 3, 8);
-            _speechEnabledCheckBox.CheckedChanged += (_, _) => UpdateVoiceControls();
-
             _speechPicker = CreateHotkeyPicker(
                 _settings.SpeechHotkey,
                 hotkey => hotkey == _triggerPicker.Value ? Strings.HotkeyUsedForConversion : null);
+
+            _speechEnabledCheckBox.CheckedChanged += (_, _) =>
+            {
+                UpdateVoiceControls();
+                // Many compact keyboards have no ScrollLock: turning voice input on asks for the key right away
+                if (_speechEnabledCheckBox.Checked) _speechPicker.StartCapture(Strings.SpeechHotkeyPrompt(_speechPicker.Value.ToString()));
+            };
 
             TableLayoutPanel content = CreatePanel(new ColumnStyle(SizeType.AutoSize));
             AddRow(content, _speechEnabledCheckBox);
             AddRow(content, CreateGroup(Strings.SpeechHotkeyGroup, _speechPicker));
             AddRow(content, CreateModelGroup());
-            AddRow(content, CreateRecognitionGroup(microphones));
+            AddRow(content, CreateRecognitionGroup(microphones, gpus));
             AddRow(content, CreateHint(Strings.SpeechPrivacy));
             return content;
+        }
+
+        /// <summary>
+        /// Automatic (naming the card it picks), each card, then the processor alone. A chosen card that is not there now
+        /// stays chosen, as an unplugged microphone does; dictation picks automatically until it is back.
+        /// </summary>
+        private void ConfigureGpuComboBox(IReadOnlyList<GpuDevice> gpus)
+        {
+            if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
+            {
+                // Whisper.net has no Vulkan build for ARM: the setting stays as it was
+                _gpuChoices.Add((_settings.SpeechUseGpu, _settings.SpeechGpu));
+                ConfigureComboBox(_gpuComboBox, Strings.SpeechGpuLabel, new object[] { Strings.SpeechGpuProcessorOnly }, 0);
+                _gpuComboBox.Enabled = false;
+                _toolTip.SetToolTip(_gpuComboBox, Strings.SpeechUseGpuUnavailable);
+                return;
+            }
+
+            var items = new List<object>();
+            GpuDevice? automatic = GpuChoice.Pick(gpus, null);
+            items.Add(automatic == null ? Strings.SpeechGpuAutomatic : Strings.SpeechGpuAutomaticWith(automatic.Name));
+            _gpuChoices.Add((true, null));
+            int selected = 0;
+            foreach (GpuDevice gpu in gpus)
+            {
+                if (_settings.SpeechGpu == gpu.Name && selected == 0) selected = items.Count;
+                items.Add(Strings.SpeechGpuName(gpu));
+                _gpuChoices.Add((true, gpu.Name));
+            }
+            if (_settings.SpeechGpu != null && selected == 0)
+            {
+                selected = items.Count;
+                items.Add(Strings.SpeechGpuUnavailable(_settings.SpeechGpu));
+                _gpuChoices.Add((true, _settings.SpeechGpu));
+            }
+            items.Add(Strings.SpeechGpuProcessorOnly);
+            _gpuChoices.Add((false, null));
+            if (!_settings.SpeechUseGpu) selected = items.Count - 1;
+
+            ConfigureComboBox(_gpuComboBox, Strings.SpeechGpuLabel, items.ToArray(), selected);
+            _toolTip.SetToolTip(_gpuComboBox, Strings.SpeechGpuTooltip);
         }
 
         private Control CreateModelGroup()
@@ -364,7 +425,7 @@ namespace MovaCore.UI
             return CreateGroup(Strings.SpeechModelGroup, _modelComboBox, _customModelRow, statusRow, _modelProgress, _whereToGetLink);
         }
 
-        private Control CreateRecognitionGroup(IReadOnlyList<AudioInputDevice> microphones)
+        private Control CreateRecognitionGroup(IReadOnlyList<AudioInputDevice> microphones, IReadOnlyList<GpuDevice> gpus)
         {
             var languageItems = new List<object>();
             foreach (string code in SpeechLanguages.Codes) languageItems.Add(Strings.SpeechLanguageName(code));
@@ -392,19 +453,30 @@ namespace MovaCore.UI
             }
             ConfigureComboBox(_microphoneComboBox, Strings.SpeechMicrophoneLabel, microphoneItems.ToArray(), selectedMicrophone);
 
-            ConfigureCheckBox(_useGpuCheckBox, Strings.SpeechUseGpu, _settings.SpeechUseGpu);
-            if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
-            {
-                // Whisper.net has no Vulkan build for ARM
-                _useGpuCheckBox.Checked = false;
-                _useGpuCheckBox.Enabled = false;
-                _toolTip.SetToolTip(_useGpuCheckBox, Strings.SpeechUseGpuUnavailable);
-            }
-            else
-            {
-                _toolTip.SetToolTip(_useGpuCheckBox, Strings.SpeechUseGpuTooltip);
-            }
+            ConfigureGpuComboBox(gpus);
+            ConfigureCheckBox(_fastRecognitionCheckBox, Strings.SpeechFastRecognition, _settings.SpeechFastRecognition);
+            _toolTip.SetToolTip(_fastRecognitionCheckBox, Strings.SpeechFastRecognitionTooltip);
+            ConfigureCheckBox(_overlayCheckBox, Strings.SpeechShowOverlay, _settings.SpeechShowOverlay);
 
+            return CreateGroup(
+                Strings.SpeechRecognitionGroup,
+                CreateLabeledRow(new Label { Text = Strings.SpeechLanguageLabel }, _speechLanguageComboBox),
+                CreateLabeledRow(new Label { Text = Strings.SpeechMicrophoneLabel }, _microphoneComboBox),
+                CreateLabeledRow(new Label { Text = Strings.SpeechGpuLabel }, _gpuComboBox),
+                _fastRecognitionCheckBox,
+                _overlayCheckBox);
+        }
+
+        private Control CreateGeneralGroup()
+        {
+            ConfigureCheckBox(_startupCheckBox, Strings.LaunchAtStartup, _settings.LaunchAtStartup);
+            ConfigureCheckBox(_notifyCheckBox, Strings.ShowNotifications, _settings.ShowNotifications);
+            ConfigureCheckBox(_restoreClipboardCheckBox, Strings.RestoreClipboard, _settings.RestoreClipboard);
+            // Here, not on the Voice tab: that one is the tallest, and must fit a 1080p screen at 150 %
+            ConfigureCheckBox(_historyCheckBox, Strings.SpeechHistoryOnDisk, _settings.SpeechHistoryOnDisk);
+            _toolTip.SetToolTip(_historyCheckBox, Strings.SpeechHistoryOnDiskTooltip);
+
+            // Here too, for the same reason
             var unloadItems = new List<object>();
             foreach (ModelUnloadTimeout option in ModelUnloadOptions) unloadItems.Add(Strings.SpeechModelUnloadName(option));
             int selectedUnload = Array.IndexOf(ModelUnloadOptions, _settings.SpeechModelUnload);
@@ -414,23 +486,6 @@ namespace MovaCore.UI
             ConfigureComboBox(_modelUnloadComboBox, Strings.SpeechModelUnloadLabel, unloadItems.ToArray(), selectedUnload);
             _toolTip.SetToolTip(unloadLabel, Strings.SpeechModelUnloadTooltip);
             _toolTip.SetToolTip(_modelUnloadComboBox, Strings.SpeechModelUnloadTooltip);
-
-            ConfigureCheckBox(_overlayCheckBox, Strings.SpeechShowOverlay, _settings.SpeechShowOverlay);
-
-            return CreateGroup(
-                Strings.SpeechRecognitionGroup,
-                CreateLabeledRow(new Label { Text = Strings.SpeechLanguageLabel }, _speechLanguageComboBox),
-                CreateLabeledRow(new Label { Text = Strings.SpeechMicrophoneLabel }, _microphoneComboBox),
-                _useGpuCheckBox,
-                CreateLabeledRow(unloadLabel, _modelUnloadComboBox),
-                _overlayCheckBox);
-        }
-
-        private Control CreateGeneralGroup()
-        {
-            ConfigureCheckBox(_startupCheckBox, Strings.LaunchAtStartup, _settings.LaunchAtStartup);
-            ConfigureCheckBox(_notifyCheckBox, Strings.ShowNotifications, _settings.ShowNotifications);
-            ConfigureCheckBox(_restoreClipboardCheckBox, Strings.RestoreClipboard, _settings.RestoreClipboard);
 
             ConfigureComboBox(
                 _languageComboBox,
@@ -452,6 +507,8 @@ namespace MovaCore.UI
                 _startupCheckBox,
                 _notifyCheckBox,
                 _restoreClipboardCheckBox,
+                _historyCheckBox,
+                CreateLabeledRow(unloadLabel, _modelUnloadComboBox),
                 CreateLabeledRow(copyPasteLabel, _copyPasteComboBox),
                 CreateLabeledRow(new Label { Text = Strings.LanguageLabel }, _languageComboBox));
         }
@@ -498,54 +555,6 @@ namespace MovaCore.UI
 
         // Layout helpers
 
-        private static TableLayoutPanel CreatePanel(params ColumnStyle[] columns)
-        {
-            var panel = new TableLayoutPanel
-            {
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                ColumnCount = columns.Length,
-                Dock = DockStyle.Fill,
-                Margin = Padding.Empty,
-            };
-            foreach (ColumnStyle column in columns) panel.ColumnStyles.Add(column);
-            return panel;
-        }
-
-        private static void AddRow(TableLayoutPanel panel, Control control)
-        {
-            int row = panel.RowStyles.Count;
-            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            panel.RowCount = row + 1;
-            panel.Controls.Add(control, 0, row);
-        }
-
-        private static GroupBox CreateGroup(string title, params Control[] rows)
-        {
-            TableLayoutPanel content = CreatePanel(new ColumnStyle(SizeType.AutoSize));
-            foreach (Control row in rows) AddRow(content, row);
-
-            var group = new GroupBox
-            {
-                Text = title,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Dock = DockStyle.Fill,
-                Padding = new Padding(8, 4, 8, 8),
-                Margin = new Padding(0, 0, 0, 8),
-            };
-            group.Controls.Add(content);
-            return group;
-        }
-
-        private static Label CreateHint(string text) => new()
-        {
-            Text = text,
-            AutoSize = true,
-            MaximumSize = new Size(ContentWidth, 0),
-            ForeColor = SystemColors.GrayText,
-        };
-
         private static TableLayoutPanel CreateLabeledRow(Label label, ComboBox comboBox)
         {
             label.AutoSize = true;
@@ -560,15 +569,6 @@ namespace MovaCore.UI
             return row;
         }
 
-        private static void ConfigureCheckBox(CheckBox checkBox, string text, bool isChecked)
-        {
-            checkBox.Text = text;
-            checkBox.Checked = isChecked;
-            checkBox.AutoSize = true;
-            checkBox.MaximumSize = new Size(ContentWidth, 0); // wraps a long text instead of widening the form
-            checkBox.Anchor = AnchorStyles.Left;
-        }
-
         private static void ConfigureComboBox(ComboBox comboBox, string accessibleName, object[] items, int selectedIndex)
         {
             comboBox.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -578,13 +578,6 @@ namespace MovaCore.UI
             comboBox.Items.AddRange(items);
             // A value written by hand into settings.json can be unknown: show the first item then
             comboBox.SelectedIndex = Math.Max(selectedIndex, 0);
-        }
-
-        private static void ConfigureButton(Button button)
-        {
-            button.AutoSize = true;
-            button.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-            button.MinimumSize = new Size(ButtonMinWidth, ButtonMinHeight);
         }
 
         private static int IndexOf<T>(IReadOnlyList<T> items, T item)
@@ -610,13 +603,13 @@ namespace MovaCore.UI
             bool enabled = _speechEnabledCheckBox.Checked;
             foreach (Control control in new Control[]
             {
-                _speechPicker, _modelComboBox, _customModelRow, _speechLanguageComboBox, _microphoneComboBox, _modelUnloadComboBox,
-                _overlayCheckBox,
+                _speechPicker, _modelComboBox, _customModelRow, _speechLanguageComboBox, _microphoneComboBox,
+                _fastRecognitionCheckBox, _overlayCheckBox,
             })
             {
                 control.Enabled = enabled;
             }
-            _useGpuCheckBox.Enabled = enabled && RuntimeInformation.ProcessArchitecture != Architecture.Arm64;
+            _gpuComboBox.Enabled = enabled && RuntimeInformation.ProcessArchitecture != Architecture.Arm64;
 
             SpeechModelInfo? model = SelectedModel;
             _customModelRow.Visible = model == null;
@@ -786,12 +779,12 @@ namespace MovaCore.UI
                 SpeechCustomModelPath = _customModelPath,
                 SpeechLanguage = SpeechLanguages.Codes[Math.Max(_speechLanguageComboBox.SelectedIndex, 0)],
                 SpeechMicrophoneId = _microphoneIds[Math.Max(_microphoneComboBox.SelectedIndex, 0)],
-                // Kept as it was on ARM, where the box is always disabled
-                SpeechUseGpu = RuntimeInformation.ProcessArchitecture == Architecture.Arm64
-                    ? _settings.SpeechUseGpu
-                    : _useGpuCheckBox.Checked,
-                SpeechModelUnload = ModelUnloadOptions[Math.Max(_modelUnloadComboBox.SelectedIndex, 0)],
+                SpeechUseGpu = _gpuChoices[Math.Max(_gpuComboBox.SelectedIndex, 0)].UseGpu,
+                SpeechGpu = _gpuChoices[Math.Max(_gpuComboBox.SelectedIndex, 0)].Name,
+                SpeechFastRecognition = _fastRecognitionCheckBox.Checked,
                 SpeechShowOverlay = _overlayCheckBox.Checked,
+                SpeechHistoryOnDisk = _historyCheckBox.Checked,
+                SpeechModelUnload = ModelUnloadOptions[Math.Max(_modelUnloadComboBox.SelectedIndex, 0)],
             };
         }
 

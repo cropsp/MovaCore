@@ -11,8 +11,8 @@ body:
     id: version
     attributes:
       label: MovaCore version
-      description: Shown in the tray menu under About.
-      placeholder: "1.2.0"
+      description: Shown at the top of the settings window and in the tray menu under About, with the build.
+      placeholder: "1.2.0, build 57"
     validations:
       required: true
   - type: input

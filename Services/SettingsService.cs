@@ -31,9 +31,16 @@ namespace MovaCore.Services
 
         public string SettingsFilePath { get; }
 
+        /// <summary>
+        /// Whether <see cref="Load"/> found no settings file: MovaCore runs for the first time (or was never set up), so
+        /// it shows its first steps. Saving once ends it.
+        /// </summary>
+        public bool IsFirstRun { get; private set; }
+
         /// <summary>Returns the saved settings, or defaults if there are none or they cannot be read. Never throws.</summary>
         public AppSettings Load()
         {
+            IsFirstRun = !File.Exists(SettingsFilePath);
             AppSettings settings = ReadFile();
             SyncAutostart(settings);
             return settings;
@@ -64,6 +71,8 @@ namespace MovaCore.Services
                 TryDelete(tempPath);
                 throw;
             }
+
+            IsFirstRun = false;
 
             if (settings.LaunchAtStartup)
             {

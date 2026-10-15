@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics.X86;
 using System.Text;
@@ -17,8 +18,10 @@ namespace MovaCore.Services
     /// <summary>
     /// Whisper through Whisper.net (whisper.cpp). The native runtime ships in runtimes\win-{arch} (CPU) and
     /// runtimes\vulkan\win-x64 (GPU) next to the exe. Whisper.net loads a runtime once per process and caches a failure
-    /// for good, so the runtime is chosen here, before Whisper.net is touched, and forced. Voice activity detection
-    /// (whisper.cpp's Silero VAD, model in models\ next to the exe) lives here too, since it needs that same runtime.
+    /// for good, so the runtime is chosen here, before Whisper.net is touched, and forced. Whisper.net loads the model;
+    /// transcription calls whisper.cpp itself (<see cref="WhisperNative"/>) to keep one whisper state for every phrase.
+    /// Voice activity detection (whisper.cpp's Silero VAD, model in models\ next to the exe) lives here too, since it
+    /// needs that same runtime.
     /// </summary>
     public sealed partial class WhisperSpeechRecognizer : ISpeechRecognizer, ISpeechDetector
     {
@@ -26,6 +29,11 @@ namespace MovaCore.Services
         public const string VadModelFileName = "ggml-silero-v6.2.0.bin";
 
         private const ulong XSTATE_MASK_AVX = 1UL << 2;
+        private const int RelationProcessorCore = 0;
+
+        // whisper_full_with_state's result when the cache of several decoders (beam search, or the fallback that samples
+        // five candidates) does not fit in memory: it then frees the state it was given
+        private const int StateFreedByWhisper = -7;
 
         // Load order of a runtime folder: dependencies first, as Whisper.net does it
         private static readonly string[] RuntimeFiles =
@@ -34,20 +42,32 @@ namespace MovaCore.Services
         };
 
         private static readonly object RuntimeLock = new();
+        private static readonly HashSet<string> LoggedNativeMessages = new(StringComparer.Ordinal);
         private static RuntimeLibrary? _runtime;
         private static IDisposable? _nativeLog;
 
+        // Read once: the cores do not change while the app runs
+        private static readonly Lazy<int> PhysicalCores = new(CountPhysicalCores);
+
         private readonly SemaphoreSlim _lock = new(1, 1);
-        private readonly HashSet<string> _warmedUp = new(StringComparer.OrdinalIgnoreCase); // models run on the GPU once
+        private readonly HashSet<string> _warmedUp = new(StringComparer.OrdinalIgnoreCase); // model and card, once each
         private WhisperFactory? _factory;
-        private WhisperProcessor? _processor;
+        private IntPtr _context; // the model's whisper_context, owned by _factory
+        private IntPtr _state;   // its whisper_state: compute buffers, on the model's device
         private string? _loadedModel;
         private bool _loadedOnGpu;
-        private string? _language;
+        private GpuDevice? _loadedGpu; // null on the CPU, or when Vulkan lists no card
+        private bool _beamSearch;
         private WhisperVadFactory? _vadFactory;
         private WhisperVadProcessor? _vad;
 
         public static string VadModelPath { get; } = Path.Combine(AppContext.BaseDirectory, "models", VadModelFileName);
+
+        /// <summary>The processor's physical cores, 0 if Windows could not tell (for the smoke test).</summary>
+        internal static int PhysicalCoreCount => PhysicalCores.Value;
+
+        /// <summary>How many whisper states were created: one per model load (for the smoke test).</summary>
+        internal int StatesCreated { get; private set; }
 
         public Task PreloadAsync(SpeechOptions options, CancellationToken cancellationToken) =>
             Task.Run(async () =>
@@ -55,8 +75,8 @@ namespace MovaCore.Services
                 await _lock.WaitAsync(cancellationToken);
                 try
                 {
-                    WhisperProcessor processor = EnsureLoaded(options);
-                    await WarmUpAsync(processor, options.ModelPath, cancellationToken);
+                    EnsureModelLoaded(options);
+                    WarmUp(options, cancellationToken);
                 }
                 finally
                 {
@@ -90,14 +110,9 @@ namespace MovaCore.Services
                 await _lock.WaitAsync(cancellationToken);
                 try
                 {
-                    WhisperProcessor processor = EnsureLoaded(options);
-                    var segments = new List<string>();
-                    // Unlike ProcessAsync, which gives up on cancellation while whisper.cpp still runs, this completes
-                    // only after the native call has returned: the lock must cover it, or the model could be freed
-                    // underneath it
-                    await processor.ProcessWithUtf8HandlerAsync(
-                        samples, segment => segments.Add(Encoding.UTF8.GetString(segment.TextUtf8)), cancellationToken);
-                    return (IReadOnlyList<string>)segments;
+                    int audioContext = options.FastRecognition ? WhisperAudioContext.For(samples.Length) : WhisperAudioContext.Full;
+                    // Synchronous: the lock covers the native call, or the model could be freed underneath it
+                    return Transcribe(samples, options, audioContext, cancellationToken);
                 }
                 finally
                 {
@@ -111,7 +126,7 @@ namespace MovaCore.Services
                 await _lock.WaitAsync();
                 try
                 {
-                    if (_processor == null) return;
+                    if (_factory == null) return;
                     Free();
                     AppLog.Info("Speech model unloaded");
                 }
@@ -120,6 +135,18 @@ namespace MovaCore.Services
                     _lock.Release();
                 }
             });
+
+        /// <summary>
+        /// Whether the processor's runtime is loaded. It stays for the process (see <see cref="ChooseRuntime"/>), so a
+        /// graphics card chosen since then works only after a restart.
+        /// </summary>
+        public static bool ProcessorRuntimeLoaded
+        {
+            get
+            {
+                lock (RuntimeLock) return _runtime == RuntimeLibrary.Cpu;
+            }
+        }
 
         /// <summary>
         /// Chooses and loads the native runtime, as the first dictation would, and describes it (for the smoke test).
@@ -132,18 +159,83 @@ namespace MovaCore.Services
 
         /// <summary>
         /// The first run on a GPU compiles its shaders, which can take seconds: better while the app starts (or the user
-        /// speaks) than on the first dictation. ggml keeps the Vulkan device and its compiled shaders until the process
-        /// exits, so a model loaded again after being freed for being idle needs no second run. On the CPU there is
-        /// nothing to gain, and a run would only keep every core busy.
+        /// speaks) than on the first dictation. ggml keeps each card's Vulkan device and its compiled shaders until the
+        /// process exits, so a model loaded again after being freed for being idle needs no second run. On the CPU there
+        /// is nothing to gain, and a run would only keep every core busy.
         /// </summary>
-        private async Task WarmUpAsync(WhisperProcessor processor, string modelPath, CancellationToken cancellationToken)
+        private void WarmUp(SpeechOptions options, CancellationToken cancellationToken)
         {
-            if (!_loadedOnGpu || !_warmedUp.Add(modelPath)) return;
+            if (!_loadedOnGpu || !_warmedUp.Add($"{options.ModelPath}|{_loadedGpu?.Position}|{_loadedGpu?.Name}")) return;
             long started = Stopwatch.GetTimestamp();
             var silence = new float[AudioSamples.SampleRate * 5 / 4];
-            await processor.ProcessWithUtf8HandlerAsync(silence, _ => { }, cancellationToken);
+            // The audio context short phrases use, or the whole window
+            Transcribe(silence, options, options.FastRecognition ? WhisperAudioContext.Step : WhisperAudioContext.Full, cancellationToken);
             AppLog.Info($"Speech model warmed up in {Stopwatch.GetElapsedTime(started).TotalSeconds:0.0} s");
         }
+
+        /// <summary>
+        /// Recognizes the samples with the loaded model and its one state, and returns the text in the parts Whisper
+        /// marked with timestamps (<see cref="WhisperNative.ReadParts"/>). whisper.cpp takes the audio context from the
+        /// parameters of each call, and the state's buffers are sized for the whole window, so every size shares it.
+        /// The parameters are those Whisper.net set before (its defaults plus what its builder was asked for), except that
+        /// a large discrete graphics card decodes with beam search (<see cref="GpuChoice.UseBeamSearch"/>): five
+        /// candidates instead of one, more accurate for a fraction of a second there, while on a processor or a small card
+        /// the decoder would cost several times as much.
+        /// </summary>
+        private unsafe IReadOnlyList<string> Transcribe(
+            float[] samples, SpeechOptions options, int audioContext, CancellationToken cancellationToken)
+        {
+            EnsureModelLoaded(options);
+            if (samples.Length == 0) return Array.Empty<string>();
+
+            WhisperFullParams parameters = WhisperNative.DefaultParams(
+                _beamSearch ? WhisperNative.SamplingBeamSearch : WhisperNative.SamplingGreedy);
+            parameters.Threads = ThreadCount(WhisperThreads.Max);
+            parameters.NoContext = 1;
+            parameters.PrintProgress = 0;
+            if (audioContext < WhisperAudioContext.Full)
+            {
+                // A short context makes Whisper prone to repeating the phrase once it is done: one segment, and a
+                // ceiling of ~15 tokens a second, far above speech, cut that loop short (TranscriptText drops the repeat)
+                parameters.AudioContext = audioContext;
+                parameters.SingleSegment = 1;
+                parameters.MaxTokens = audioContext / 4;
+            }
+
+            byte[] language = Encoding.UTF8.GetBytes(options.Language + "\0");
+            GCHandle cancellation = GCHandle.Alloc(cancellationToken);
+            try
+            {
+                int result;
+                fixed (byte* languageUtf8 = language)
+                fixed (float* audio = samples)
+                {
+                    parameters.Language = (IntPtr)languageUtf8;
+                    parameters.AbortCallback = (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, byte>)&ShouldAbort;
+                    parameters.AbortCallbackUserData = GCHandle.ToIntPtr(cancellation);
+                    result = WhisperNative.Full(_context, _state, parameters, audio, samples.Length);
+                }
+                if (result == StateFreedByWhisper)
+                {
+                    // Already freed: only the model is left to free, and the next dictation loads it again
+                    _state = IntPtr.Zero;
+                    Free();
+                    throw new InvalidOperationException("whisper.cpp ran out of memory for decoding and freed its state");
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+                if (result != 0) throw new InvalidOperationException($"whisper.cpp could not transcribe (error {result})");
+            }
+            finally
+            {
+                cancellation.Free();
+            }
+            return WhisperNative.ReadParts(_context, _state);
+        }
+
+        // whisper.cpp asks before each computation whether to stop, so a cancelled dictation ends within a moment
+        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+        private static byte ShouldAbort(IntPtr cancellation) =>
+            GCHandle.FromIntPtr(cancellation).Target is CancellationToken { IsCancellationRequested: true } ? (byte)1 : (byte)0;
 
         // Settings close to Handy's (Silero with smoothing): a lenient threshold, since losing speech is worse than
         // keeping a little silence, and padding that keeps the edges of words
@@ -159,7 +251,7 @@ namespace MovaCore.Services
                 _vadFactory = WhisperVadFactory.FromPath(VadModelPath, new WhisperFactoryOptions { UseGpu = false });
                 _vad = _vadFactory.CreateBuilder()
                     .WithUseGpu(false)
-                    .WithThreads(Math.Clamp(Environment.ProcessorCount, 1, 4))
+                    .WithThreads(ThreadCount(WhisperThreads.MaxForVad))
                     .WithThreshold(0.3f)
                     .WithMinSpeechDuration(TimeSpan.FromMilliseconds(100))
                     .WithMinSilenceDuration(TimeSpan.FromMilliseconds(450))
@@ -175,66 +267,91 @@ namespace MovaCore.Services
             return _vad;
         }
 
-        private WhisperProcessor EnsureLoaded(SpeechOptions options)
+        private void EnsureModelLoaded(SpeechOptions options)
         {
-            bool onGpu = options.UseGpu && ChooseRuntime(options.UseGpu) == RuntimeLibrary.Vulkan;
+            // Always first: with the GPU off too, Whisper.net must get the forced runtime (and the native log) before it
+            // loads anything
+            RuntimeLibrary runtime = ChooseRuntime(options.UseGpu);
+            bool onGpu = options.UseGpu && runtime == RuntimeLibrary.Vulkan;
+            // whisper.cpp would take the first card Vulkan lists, on a laptop often the integrated one
+            GpuDevice? gpu = onGpu ? GpuChoice.Pick(VulkanDevices.List(), options.GpuName) : null;
+            if (_factory != null && _loadedModel == options.ModelPath && _loadedOnGpu == onGpu && _loadedGpu == gpu) return;
 
-            if (_processor == null || _loadedModel != options.ModelPath || _loadedOnGpu != onGpu)
+            // Never two models in memory at once: they take hundreds of megabytes each
+            Free();
+            switch (SpeechModelFile.Check(options.ModelPath))
             {
-                // Never two models in memory at once: they take hundreds of megabytes each
+                case SpeechModelFormat.Missing:
+                    throw new SpeechException(SpeechError.ModelMissing, "The speech model is not on disk");
+                case SpeechModelFormat.Ggml:
+                    break;
+                default:
+                    throw new SpeechException(SpeechError.ModelUnsupported, "The speech model is not a whisper.cpp (ggml) file");
+            }
+
+            long started = Stopwatch.GetTimestamp();
+            try
+            {
+                // Flash attention: faster, and less memory on the graphics card
+                _factory = WhisperFactory.FromPath(
+                    options.ModelPath,
+                    new WhisperFactoryOptions { UseGpu = onGpu, GpuDevice = gpu?.Position ?? 0, UseFlashAttention = true });
+                _factory.CreateBuilder(); // Whisper.net loads the model on first use: now, so that a bad file fails here
+            }
+            catch (WhisperModelLoadException ex)
+            {
                 Free();
-                switch (SpeechModelFile.Check(options.ModelPath))
-                {
-                    case SpeechModelFormat.Missing:
-                        throw new SpeechException(SpeechError.ModelMissing, "The speech model is not on disk");
-                    case SpeechModelFormat.Ggml:
-                        break;
-                    default:
-                        throw new SpeechException(SpeechError.ModelUnsupported, "The speech model is not a whisper.cpp (ggml) file");
-                }
-
-                long started = Stopwatch.GetTimestamp();
-                try
-                {
-                    _factory = WhisperFactory.FromPath(options.ModelPath, new WhisperFactoryOptions { UseGpu = onGpu });
-                    _processor = _factory.CreateBuilder()
-                        .WithLanguage(options.Language)
-                        .WithNoContext()
-                        .WithThreads(Math.Clamp(Environment.ProcessorCount, 1, 8))
-                        .Build();
-                }
-                catch (WhisperModelLoadException ex)
-                {
-                    Free();
-                    throw new SpeechException(SpeechError.ModelUnsupported, ex.Message, ex);
-                }
-
-                _loadedModel = options.ModelPath;
-                _loadedOnGpu = onGpu;
-                _language = options.Language;
-                AppLog.Info($"Speech model {Path.GetFileName(options.ModelPath)} loaded in " +
-                    $"{Stopwatch.GetElapsedTime(started).TotalSeconds:0.0} s ({(onGpu ? "GPU" : "CPU")})");
+                throw new SpeechException(SpeechError.ModelUnsupported, ex.Message, ex);
             }
-            else if (_language != options.Language)
+            bool beamSearch = GpuChoice.UseBeamSearch(gpu);
+            if (gpu != null && options.GpuName != null && gpu.Name != options.GpuName)
+                AppLog.Info($"Graphics card {options.GpuName} not found, {gpu.Name} instead");
+            string device = !onGpu ? "CPU" : $"GPU: {gpu?.Name ?? "none listed"}, {(beamSearch ? "beam search" : "greedy")}";
+            AppLog.Info($"Speech model {Path.GetFileName(options.ModelPath)} loaded in " +
+                $"{Stopwatch.GetElapsedTime(started).TotalSeconds:0.0} s ({device})");
+
+            // One state for every phrase: Whisper.net would create one, and its buffers, on each transcription
+            started = Stopwatch.GetTimestamp();
+            try
             {
-                _processor.ChangeLanguage(options.Language);
-                _language = options.Language;
+                _context = ContextOf(_factory).Value;
+                _state = WhisperNative.InitState(_context);
+                if (_state == IntPtr.Zero)
+                    throw new InvalidOperationException("whisper.cpp could not create a state for the speech model");
             }
-            return _processor;
+            catch
+            {
+                Free();
+                throw;
+            }
+            StatesCreated++;
+            AppLog.Info($"Speech state ready in {Stopwatch.GetElapsedTime(started).TotalMilliseconds:0} ms");
+
+            _loadedModel = options.ModelPath;
+            _loadedOnGpu = onGpu;
+            _loadedGpu = gpu;
+            _beamSearch = beamSearch;
         }
+
+        // Whisper.net keeps the model's whisper_context to itself (WhisperFactory.contextLazy in 1.9.2-preview1); a
+        // renamed field fails here with MissingFieldException, which the smoke test reports
+        [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "contextLazy")]
+        private static extern ref Lazy<IntPtr> ContextOf(WhisperFactory factory);
 
         private void Free()
         {
+            // The state before the model it belongs to
+            if (_state != IntPtr.Zero) WhisperNative.FreeState(_state);
+            _state = IntPtr.Zero;
+            _context = IntPtr.Zero;
             try
             {
-                _processor?.Dispose();
                 _factory?.Dispose();
             }
             catch (Exception ex)
             {
                 AppLog.Error("Could not free the speech model", ex);
             }
-            _processor = null;
             _factory = null;
             _loadedModel = null;
         }
@@ -273,10 +390,7 @@ namespace MovaCore.Services
 
                 RuntimeLibrary runtime = RuntimeLibrary.Cpu;
                 string folder = cpuFolder;
-                // Implicit Vulkan layers (the overlays of OBS, Steam, RTSS and the like) load into every Vulkan process
-                // and have crashed speech recognition in other apps (Handy); a value the user set is kept
-                if (useGpu && Environment.GetEnvironmentVariable("VK_LOADER_LAYERS_DISABLE") == null)
-                    Environment.SetEnvironmentVariable("VK_LOADER_LAYERS_DISABLE", "~implicit~");
+                if (useGpu) VulkanDevices.DisableImplicitLayers();
                 // Vulkan comes with the graphics driver (vulkan-1.dll). No fallback after trying it: a half-loaded runtime
                 // cannot be mixed with the other one's identically named DLLs.
                 if (useGpu && !arm64 && File.Exists(Path.Combine(vulkanFolder, "ggml-vulkan-whisper.dll"))
@@ -291,17 +405,41 @@ namespace MovaCore.Services
                 foreach (string file in RuntimeFiles)
                 {
                     string path = Path.Combine(folder, file);
+                    if (!File.Exists(path)) continue;
                     // The VC++ runtime DLLs next to them are found because the path is absolute
-                    if (File.Exists(path) && !NativeLibrary.TryLoad(path, out _))
+                    if (!NativeLibrary.TryLoad(path, out IntPtr library))
                         throw new SpeechException(SpeechError.RuntimeMissing, $"{file} could not be loaded (missing VC++ runtime?)");
+                    // The module Whisper.net loads from this same path: transcription calls into it directly
+                    if (file == "whisper.dll") WhisperNative.Bind(library);
                 }
 
                 RuntimeOptions.ForcedRuntimeLibrary = runtime;
                 _nativeLog ??= LogProvider.AddLogger(OnNativeLog);
                 _runtime = runtime;
-                AppLog.Info($"Speech recognition runtime: {runtime}");
+                AppLog.Info($"Speech recognition runtime: {runtime}, {ThreadCount(WhisperThreads.Max)} threads " +
+                    $"({PhysicalCores.Value} cores, {Environment.ProcessorCount} logical processors)");
                 return runtime;
             }
+        }
+
+        private static int ThreadCount(int max) => WhisperThreads.For(PhysicalCores.Value, Environment.ProcessorCount, max);
+
+        private static unsafe int CountPhysicalCores()
+        {
+            // The first call tells the size the records need
+            uint length = 0;
+            GetLogicalProcessorInformationEx(RelationProcessorCore, null, &length);
+            var records = new byte[length];
+            fixed (byte* buffer = records)
+            {
+                if (length == 0 || !GetLogicalProcessorInformationEx(RelationProcessorCore, buffer, &length))
+                {
+                    // As before: a thread per logical processor
+                    AppLog.Error($"Could not count the processor cores (error {Marshal.GetLastPInvokeError()})");
+                    return 0;
+                }
+            }
+            return WhisperThreads.CountCores(records.AsSpan(0, (int)length));
         }
 
         /// <summary>
@@ -323,12 +461,27 @@ namespace MovaCore.Services
             return fma && avx && f16c && avx2 && osxsave && (GetEnabledXStateFeatures() & XSTATE_MASK_AVX) != 0;
         }
 
-        // whisper.cpp reports loading details at Info level; warnings and errors help when a model does not load.
-        // It never logs the recognized text unless asked to.
+        // Warnings and errors help when a model does not load; the device and its buffers tell why recognition is slow
+        // on a given computer (ggml names the Vulkan device at Debug level). Loading details are left out, and
+        // whisper.cpp never logs the recognized text unless asked to.
         private static void OnNativeLog(WhisperLogLevel level, string? message)
         {
-            if (level is WhisperLogLevel.Error or WhisperLogLevel.Warning && !string.IsNullOrWhiteSpace(message))
-                AppLog.Info("whisper.cpp: " + message.Trim());
+            if (string.IsNullOrWhiteSpace(message)) return;
+            bool problem = level is WhisperLogLevel.Error or WhisperLogLevel.Warning;
+            bool device = level is WhisperLogLevel.Info or WhisperLogLevel.Debug
+                && (message.Contains("vulkan", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("backend", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("buffer", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("flash", StringComparison.OrdinalIgnoreCase));
+            if (!problem && !device) return;
+
+            // whisper.cpp describes the backend and its buffers again for every transcription: once is enough
+            string line = message.Trim();
+            lock (LoggedNativeMessages)
+            {
+                if (!LoggedNativeMessages.Add(line)) return;
+            }
+            AppLog.Info("whisper.cpp: " + line);
         }
 
         public void Dispose()
@@ -343,5 +496,9 @@ namespace MovaCore.Services
         // The XSAVE features Windows enables (Windows 7 SP1 and later)
         [LibraryImport("kernel32.dll")]
         private static partial ulong GetEnabledXStateFeatures();
+
+        [LibraryImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static unsafe partial bool GetLogicalProcessorInformationEx(int relationshipType, byte* buffer, uint* returnedLength);
     }
 }

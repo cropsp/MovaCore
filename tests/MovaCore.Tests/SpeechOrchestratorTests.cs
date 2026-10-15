@@ -32,14 +32,14 @@ namespace MovaCore.Tests
         private SpeechOrchestrator Create(
             TimeSpan? minRecording = null, TimeSpan? maxRecording = null, string? modelPath = "", ISpeechDetector? detector = null,
             TimeSpan? keepMicrophoneOpen = null, TimeSpan? trailingAudio = null, TimeSpan? noticeableHold = null,
-            DictationContext? context = null, TimeSpan? unloadAfter = null)
+            DictationContext? context = null, DictationHistory? history = null, TimeSpan? unloadAfter = null)
         {
             var paster = new TextPaster(_hotkeys, _clipboard, new ClipboardGate())
             {
                 PasteTimeout = TimeSpan.FromMilliseconds(100),
                 RestoreDelay = TimeSpan.Zero,
             };
-            var orchestrator = new SpeechOrchestrator(_recorder, _recognizer, paster, detector, context)
+            var orchestrator = new SpeechOrchestrator(_recorder, _recognizer, paster, detector, context, history)
             {
                 MinRecording = minRecording ?? TimeSpan.Zero,
                 MaxRecording = maxRecording ?? TimeSpan.FromMinutes(1),
@@ -55,23 +55,33 @@ namespace MovaCore.Tests
         private void Recreate(
             TimeSpan? minRecording = null, TimeSpan? maxRecording = null, string? modelPath = "", ISpeechDetector? detector = null,
             TimeSpan? keepMicrophoneOpen = null, TimeSpan? trailingAudio = null, TimeSpan? noticeableHold = null,
-            DictationContext? context = null, TimeSpan? unloadAfter = null)
+            DictationContext? context = null, DictationHistory? history = null, TimeSpan? unloadAfter = null)
         {
             _orchestrator.Dispose();
             _events.Dispose();
             _events = new BlockingCollection<SpeechStateChangedEventArgs>();
             _orchestrator = Create(
-                minRecording, maxRecording, modelPath, detector, keepMicrophoneOpen, trailingAudio, noticeableHold, context, unloadAfter);
+                minRecording, maxRecording, modelPath, detector, keepMicrophoneOpen, trailingAudio, noticeableHold, context, history,
+                unloadAfter);
         }
 
         // The model stays loaded unless a test says otherwise
         private static SpeechSettings Settings(string? modelPath, TimeSpan? unloadAfter = null) =>
-            new(true, modelPath, "uk", false, "{mic-1}", true, unloadAfter);
+            new(true, modelPath, "uk", false, "{mic-1}", true, UnloadAfter: unloadAfter);
 
         private SpeechStateChangedEventArgs Next()
         {
             Assert.True(_events.TryTake(out var change, WaitLimit), "No state change arrived");
             return change!;
+        }
+
+        private SpeechStateChangedEventArgs NextIdleOr(SpeechState state)
+        {
+            while (true)
+            {
+                SpeechStateChangedEventArgs change = Next();
+                if (change.State == SpeechState.Idle || change.State == state) return change;
+            }
         }
 
         private SpeechStateChangedEventArgs NextIdle()
@@ -107,6 +117,34 @@ namespace MovaCore.Tests
             Assert.NotEmpty(_recognizer.Preloads); // ahead of time (Configure) and again on the press
             Assert.All(_recognizer.Preloads, options => Assert.Equal(expected, options));
             Assert.Equal(expected, Assert.Single(_recognizer.Transcriptions));
+        }
+
+        [Fact]
+        public void TextPasted_ComesBeforeTheFinalState()
+        {
+            int pasted = 0, idleBefore = 0;
+            _orchestrator.TextPasted += (_, _) =>
+            {
+                Interlocked.Increment(ref pasted);
+                if (_events.Any(change => change.State == SpeechState.Idle)) Interlocked.Increment(ref idleBefore);
+            };
+
+            Dictate();
+
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+            Assert.Equal(1, Volatile.Read(ref pasted));
+            Assert.Equal(0, Volatile.Read(ref idleBefore));
+        }
+
+        [Fact]
+        public void FastRecognition_ReachesTheRecognizer()
+        {
+            _orchestrator.Configure(Settings(_modelPath) with { FastRecognition = true });
+
+            Dictate();
+
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+            Assert.True(Assert.Single(_recognizer.Transcriptions).FastRecognition);
         }
 
         [Fact]
@@ -285,25 +323,82 @@ namespace MovaCore.Tests
             Assert.Equal(0, _hotkeys.PasteCalls);
         }
 
+        // People press again without looking whether the previous text is in: the next phrase is recorded meanwhile,
+        // and both are pasted in the order they were said
         [Fact]
-        public void PressDuringTranscription_IsIgnoredWithItsRelease()
+        public void PressDuringTranscription_RecordsTheNextPhrase()
         {
             _recognizer.Gate = new TaskCompletionSource();
+            _recognizer.SegmentsFor = call => new[] { call == 0 ? " Перша." : " Друга." };
             Dictate();
             Assert.Equal(SpeechState.Recording, Next().State);
             Assert.Equal(SpeechState.Transcribing, Next().State);
 
             Dictate();
-            Assert.False(_events.TryTake(out _, 200));
+            Assert.Equal(SpeechState.Recording, Next().State);
+            Assert.Equal(SpeechState.Transcribing, Next().State);
             _recognizer.Gate.SetResult();
 
             Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
-            Assert.Single(_recognizer.Transcriptions);
-            Assert.Single(_recorder.StartedDevices);
+            Assert.False(_events.TryTake(out _, 200)); // idle once, after both
+            Assert.Equal(2, _recognizer.Transcriptions.Count);
+            Assert.Equal(2, _recorder.StartedDevices.Count);
+            Assert.Equal(new[] { "Перша.", "Друга." }, _clipboard.SetTexts);
+            Assert.Equal(2, _hotkeys.PasteCalls);
+        }
 
-            _recognizer.Gate = null;
+        // The indicator stays while the next phrase is recorded: the earlier phrase's paste does not hide it
+        [Fact]
+        public void EarlierPhrasePasted_WhileTheNextIsRecorded_DoesNotHideTheIndicator()
+        {
+            int pasted = 0;
+            _orchestrator.TextPasted += (_, _) => Interlocked.Increment(ref pasted);
+            _recognizer.Gate = new TaskCompletionSource();
             Dictate();
+            Assert.Equal(SpeechState.Transcribing, NextIdleOr(SpeechState.Transcribing).State);
+
+            _orchestrator.OnHotkeyPressed();
+            Assert.Equal(SpeechState.Recording, Next().State);
+            _recognizer.Gate.SetResult();
+            Assert.True(SpinWait.SpinUntil(() => _hotkeys.PasteCalls == 1, WaitLimit));
+            Assert.Equal(0, Volatile.Read(ref pasted));
+
+            _orchestrator.OnHotkeyReleased();
             Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+            Assert.Equal(1, Volatile.Read(ref pasted));
+        }
+
+        [Fact]
+        public void CancelWithPhrasesWaiting_PastesNoneOfThem()
+        {
+            _recognizer.Gate = new TaskCompletionSource();
+            Dictate();
+            Dictate();
+            Assert.True(SpinWait.SpinUntil(() => _recorder.StartedDevices.Count == 2, WaitLimit));
+
+            _orchestrator.Cancel();
+
+            Assert.Equal(SpeechOutcome.Cancelled, NextIdle().Outcome);
+            _recognizer.Gate.SetResult();
+            Assert.False(_events.TryTake(out _, 300));
+            Assert.Equal(0, _hotkeys.PasteCalls);
+        }
+
+        // A phrase that fails while the next is under way is still reported, once all are done
+        [Fact]
+        public void EarlierPhraseFailure_IsReportedAtTheEnd()
+        {
+            _recognizer.Gate = new TaskCompletionSource();
+            _recognizer.SegmentsFor = call => call == 0 ? throw new InvalidOperationException("boom") : new[] { " Друга." };
+            Dictate();
+            Dictate();
+            Assert.True(SpinWait.SpinUntil(() => _recorder.StartedDevices.Count == 2, WaitLimit));
+            _recognizer.Gate.SetResult();
+
+            SpeechStateChangedEventArgs idle = NextIdle();
+            Assert.Equal(SpeechOutcome.Failed, idle.Outcome);
+            Assert.Equal("boom", idle.Detail);
+            Assert.Equal(new[] { "Друга." }, _clipboard.SetTexts);
         }
 
         [Fact]
@@ -500,8 +595,9 @@ namespace MovaCore.Tests
             Assert.True(System.Diagnostics.Stopwatch.GetElapsedTime(released, _recorder.StoppedAt) >= TimeSpan.FromMilliseconds(140));
         }
 
+        // Pressed again a moment after the release: the first phrase ends there, and the next one is recorded
         [Fact]
-        public void PressDuringTheTrailingAudio_IsIgnoredWithItsRelease()
+        public void PressDuringTheTrailingAudio_EndsThePhraseAndRecordsTheNext()
         {
             Recreate(trailingAudio: TimeSpan.FromMilliseconds(300));
             _orchestrator.OnHotkeyPressed();
@@ -510,10 +606,11 @@ namespace MovaCore.Tests
 
             Dictate();
 
-            Assert.Equal(SpeechState.Transcribing, Next().State);
             Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
-            Assert.False(_events.TryTake(out _, 200));
-            Assert.Single(_recorder.StartedDevices);
+            Assert.False(_events.TryTake(out _, 400));
+            Assert.Equal(2, _recorder.StartedDevices.Count);
+            Assert.Equal(2, _recognizer.Transcriptions.Count);
+            Assert.Equal(2, _hotkeys.PasteCalls);
         }
 
         [Fact]
@@ -677,6 +774,27 @@ namespace MovaCore.Tests
             await WaitUntil(() => _recognizer.Unloads > 0);
         }
 
+        // Phrases still waiting to be recognized keep the model: idle means the last one is pasted
+        [Fact]
+        public async Task QueuedPhrases_KeepTheModelUntilTheLastIsPasted()
+        {
+            Recreate(unloadAfter: TimeSpan.Zero);
+            await WaitUntil(() => _recognizer.Unloads > 0); // freed when the setting is applied
+            int unloads = _recognizer.Unloads;
+            _recognizer.Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            Dictate();
+            Dictate();
+            await WaitUntil(() => _recognizer.Transcriptions.Count > 0);
+            await Task.Delay(200);
+            Assert.Equal(unloads, _recognizer.Unloads);
+
+            _recognizer.Gate.SetResult();
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+            await WaitUntil(() => _recognizer.Unloads > unloads);
+            Assert.Equal(2, _recognizer.Transcriptions.Count);
+        }
+
         // Nothing is kept: the model loads while the user speaks and is freed as soon as the text is pasted
         [Fact]
         public async Task ImmediateUnload_LoadsOnThePressAndFreesAfterTheDictation()
@@ -714,22 +832,24 @@ namespace MovaCore.Tests
             await WaitUntil(() => _recognizer.Preloads.Count > 0);
             lock (_recognizer.Preloads) _recognizer.Preloads.Clear();
 
-            _orchestrator.Configure(new SpeechSettings(true, _modelPath, "en", false, null, false, null));
+            _orchestrator.Configure(new SpeechSettings(true, _modelPath, "en", false, null, false, FastRecognition: true));
             await Task.Delay(200);
 
             Assert.Empty(_recognizer.Preloads);
         }
 
-        [Fact]
-        public async Task OtherModelConfigured_IsLoadedAheadOfTime()
+        [Theory]
+        [InlineData(true, null)]
+        [InlineData(true, "NVIDIA GeForce RTX 4060")]
+        public async Task OtherModelOrCardConfigured_IsLoadedAheadOfTime(bool useGpu, string? gpuName)
         {
             await WaitUntil(() => _recognizer.Preloads.Count > 0);
             lock (_recognizer.Preloads) _recognizer.Preloads.Clear();
 
-            _orchestrator.Configure(new SpeechSettings(true, _modelPath, "uk", true, "{mic-1}", true, null));
+            _orchestrator.Configure(new SpeechSettings(true, _modelPath, "uk", useGpu, "{mic-1}", true, GpuName: gpuName));
 
             await WaitUntil(() => _recognizer.Preloads.Count > 0);
-            Assert.Equal(new SpeechOptions(_modelPath, "uk", true), _recognizer.Preloads[0]);
+            Assert.Equal(new SpeechOptions(_modelPath, "uk", useGpu, GpuName: gpuName), _recognizer.Preloads[0]);
         }
 
         // Turning the unloading on applies to the model that is already loaded
@@ -770,6 +890,43 @@ namespace MovaCore.Tests
             Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
 
             Assert.Equal(" так буде краще.", _clipboard.LastSetText);
+        }
+
+        // Said while the first phrase was still being recognized: it continues it all the same
+        [Fact]
+        public void NextPhraseRecordedMeanwhile_ContinuesThePreviousDictation()
+        {
+            var target = new FakeDictationTarget();
+            using var context = new DictationContext(target);
+            Recreate(context: context);
+            _recognizer.Gate = new TaskCompletionSource();
+            _recognizer.SegmentsFor = call => new[] { call == 0 ? " Я думаю, що" : " Так буде краще." };
+
+            Dictate();
+            Dictate();
+            Assert.True(SpinWait.SpinUntil(() => _recorder.StartedDevices.Count == 2, WaitLimit));
+            _recognizer.Gate.SetResult();
+
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+            Assert.Equal(new[] { "Я думаю, що", " так буде краще." }, _clipboard.SetTexts);
+        }
+
+        // A phrase that did not get pasted can be copied from the tray menu: it is in the history either way, as recognized
+        [Fact]
+        public void RecognizedPhrases_GoToTheHistory_PastedOrNot()
+        {
+            var history = new DictationHistory(Path.Combine(Path.GetTempPath(), $"movacore-history-{Guid.NewGuid():N}.json"));
+            Recreate(history: history);
+
+            _recognizer.Segments = new[] { " Перша." };
+            Dictate();
+            Assert.Equal(SpeechOutcome.Pasted, NextIdle().Outcome);
+            _clipboard.PasteObserved = false;
+            _recognizer.Segments = new[] { " Друга." };
+            Dictate();
+            Assert.Equal(SpeechOutcome.NotPasted, NextIdle().Outcome);
+
+            Assert.Equal(new[] { ("Друга.", false), ("Перша.", true) }, history.Entries.Select(entry => (entry.Text, entry.Pasted)));
         }
 
         [Fact]

@@ -28,6 +28,7 @@ namespace MovaCore.Tests
         public bool OwnedByUs { get; private set; }
 
         public string? LastSetText { get; private set; }
+        public List<string> SetTexts { get; } = new(); // every text set, in order
         public uint? RestoredExpectedSequence { get; private set; }
 
         public int GetCalls { get; set; }
@@ -59,6 +60,7 @@ namespace MovaCore.Tests
 
             Text = text;
             LastSetText = text;
+            lock (SetTexts) SetTexts.Add(text);
             OwnedByUs = true;
             Sequence++;
             _setTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();

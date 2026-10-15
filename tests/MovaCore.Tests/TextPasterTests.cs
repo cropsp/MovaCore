@@ -35,6 +35,24 @@ namespace MovaCore.Tests
         }
 
         [Fact]
+        public async Task OnPasted_RunsRightAfterThePasteKeys_BeforeTheRestore()
+        {
+            _clipboard.SimulateAppCopy("user clipboard");
+            int calls = 0, pastesThen = -1, restoresThen = -1;
+
+            await _paster.PasteAsync("Привіт", restoreClipboard: true, onPasted: () =>
+            {
+                calls++;
+                pastesThen = _hotkeys.PasteCalls;
+                restoresThen = _clipboard.RestoreCalls;
+            });
+
+            Assert.Equal(1, calls);
+            Assert.Equal(1, pastesThen);
+            Assert.Equal(0, restoresThen);
+        }
+
+        [Fact]
         public async Task PasteNotObserved_LeavesTheTextOnTheClipboard()
         {
             _clipboard.SimulateAppCopy("user clipboard");

@@ -48,6 +48,7 @@ namespace MovaCore
         {
             var timer = new System.Windows.Forms.Timer { Interval = StepIntervalMs };
             SettingsForm? form = null;
+            FirstStepsForm? firstSteps = null;
             int step = 0;
 
             timer.Tick += async (s, e) =>
@@ -58,19 +59,32 @@ namespace MovaCore
                     switch (step++)
                     {
                         case 0:
+                            CheckBuildInfo();
+                            CheckDictationHistory();
                             IReadOnlyList<AudioInputDevice> microphones = recorder.GetInputDevices();
                             // CI runners have no microphone: listing them must work, finding none is fine
                             AppLog.Info($"Smoke test: {microphones.Count} microphone(s) found");
                             recorder.Close(); // closing a microphone that is not open does nothing
                             if (recorder.IsOpen || recorder.CopyRecent(new float[SpectrumAnalyzer.WindowSize]) != 0)
                                 AppLog.Error("Smoke test: a closed recorder reports audio");
-                            form = new SettingsForm(new AppSettings(), _ => Task.FromResult<Hotkey?>(null), microphones, downloads);
+                            // CI runners have no graphics card either: listing them through Vulkan must work all the same
+                            AppLog.Info($"Smoke test: {VulkanDevices.List().Count} graphics card(s) found");
+                            // The form gets made-up cards, so that their list is laid out too
+                            var gpus = new[]
+                            {
+                                new GpuDevice(0, "Integrated Graphics", false, 1UL << 30),
+                                new GpuDevice(1, "Discrete Graphics", true, 8UL << 30),
+                            };
+                            form = new SettingsForm(new AppSettings(), _ => Task.FromResult<Hotkey?>(null), microphones, gpus, downloads);
                             form.Show();
+                            firstSteps = new FirstStepsForm(new AppSettings(), _ => Task.FromResult<Hotkey?>(null), downloads, firstRun: true);
+                            firstSteps.Show();
                             break;
                         case 1:
                             // Controls on a tab page are created when the page is first shown
                             for (int i = form!.Tabs.TabCount - 1; i >= 0; i--) form.Tabs.SelectedIndex = i;
-                            CheckSettingsFormSize(form);
+                            CheckFitsScreen(form, "settings form");
+                            CheckFirstSteps(firstSteps!);
                             await CheckConverterAndClipboardAsync(clipboard, converter);
                             break;
                         case 2:
@@ -122,14 +136,59 @@ namespace MovaCore
             timer.Start();
         }
 
-        // The settings form sizes itself; at 150 % it must still fit a 1080p screen (720 logical pixels high)
-        private static void CheckSettingsFormSize(Form form)
+        // In CI the exe must carry the run's number and commit (MovaCore.csproj writes them into BuildInfo)
+        private static void CheckBuildInfo()
+        {
+            AppLog.Info($"Smoke test: {Strings.BuildLabel(BuildInfo.Number, BuildInfo.Commit, BuildInfo.Date)}");
+            string? runNumber = Environment.GetEnvironmentVariable("GITHUB_RUN_NUMBER");
+            if (runNumber == null) return; // run by hand
+            string? commit = Environment.GetEnvironmentVariable("GITHUB_SHA");
+            if (BuildInfo.Number != runNumber || BuildInfo.Commit.Length == 0
+                || commit?.StartsWith(BuildInfo.Commit, StringComparison.Ordinal) != true)
+            {
+                AppLog.Error($"Smoke test: the exe says build {BuildInfo.Number} ({BuildInfo.Commit}), CI runs {runNumber} ({commit})");
+            }
+        }
+
+        // Kept on disk only when asked for: the file round-trips through the source-generated JSON, and turning it off
+        // deletes it
+        private static void CheckDictationHistory()
+        {
+            string path = Path.Combine(Path.GetTempPath(), $"movacore-history-{Guid.NewGuid():N}.json");
+            var history = new DictationHistory(path);
+            history.Add("Перша фраза.", pasted: true, DateTime.Now);
+            if (File.Exists(path)) AppLog.Error("Smoke test: the dictation history was written without being asked to");
+            history.SetSaveToDisk(true);
+            history.Add("Друга фраза.", pasted: false, DateTime.Now);
+
+            var restarted = new DictationHistory(path);
+            restarted.SetSaveToDisk(true);
+            IReadOnlyList<DictationEntry> entries = restarted.Entries;
+            if (entries.Count != 2 || entries[0].Text != "Друга фраза." || entries[0].Pasted || !entries[1].Pasted)
+                AppLog.Error($"Smoke test: the dictation history did not survive a restart ({entries.Count} entries)");
+
+            restarted.SetSaveToDisk(false);
+            if (File.Exists(path)) AppLog.Error("Smoke test: turning the dictation history off left its file");
+            AppLog.Info("Smoke test: dictation history checked");
+        }
+
+        // The windows size themselves; at 150 % they must still fit a 1080p screen (720 logical pixels high)
+        private static void CheckFitsScreen(Form form, string name)
         {
             int logicalHeight = form.Height * 96 / form.DeviceDpi;
             int logicalWidth = form.Width * 96 / form.DeviceDpi;
-            AppLog.Info($"Smoke test: settings form is {logicalWidth}x{logicalHeight} at 96 DPI");
+            AppLog.Info($"Smoke test: {name} is {logicalWidth}x{logicalHeight} at 96 DPI");
             if (logicalHeight > 720)
-                AppLog.Error($"Smoke test: the settings form is {logicalHeight} px high and would not fit a 1080p screen at 150 %");
+                AppLog.Error($"Smoke test: the {name} is {logicalHeight} px high and would not fit a 1080p screen at 150 %");
+        }
+
+        // Shown at the first run: it must lay out, and closing it must keep what it suggests (autostart at the first run)
+        private static void CheckFirstSteps(FirstStepsForm firstSteps)
+        {
+            CheckFitsScreen(firstSteps, "first steps window");
+            firstSteps.Close(); // a form shown without a dialog is disposed by Close
+            if (firstSteps.UpdatedSettings is not { LaunchAtStartup: true, SpeechEnabled: false })
+                AppLog.Error("Smoke test: closing the first steps window lost its choices");
         }
 
         // The converter reads the user's installed layouts; check that reading against the real layout files.
@@ -236,9 +295,6 @@ namespace MovaCore
 
             overlay.ShowTranscribing();
             await Task.Delay(450); // the mouse gnaws its wheat after a delay
-            overlay.RenderFrame().Dispose();
-            overlay.ShowPasted();
-            await Task.Delay(150);
             overlay.RenderFrame().Dispose();
             foreach (MouseScene.Pose pose in new[] { MouseScene.Pose.Puzzled, MouseScene.Pose.Straining, MouseScene.Pose.Calm })
             {
@@ -375,6 +431,11 @@ namespace MovaCore
                 return;
             }
 
+            // Whisper's threads follow the physical cores, which Windows reports in variable-size records
+            int cores = WhisperSpeechRecognizer.PhysicalCoreCount;
+            if (cores < 1 || cores > Environment.ProcessorCount)
+                AppLog.Error($"Smoke test: {cores} processor cores counted, {Environment.ProcessorCount} logical processors");
+
             // A recording of "hello world" if CI could make one, a second of a tone otherwise
             float[] audio;
             if (audioPath != null)
@@ -397,24 +458,45 @@ namespace MovaCore
                 return;
             }
 
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            var options = new SpeechOptions(modelPath, "en", UseGpu: true);
+            // With the whole 30-second window, then with the short audio context of a short phrase
             float[] padded = AudioSamples.PadToMinimum(audio, SpeechOrchestrator.MinAudioLength);
-
-            // As dictation does it: loaded (and warmed up on the GPU) ahead of time, transcribed, freed once idle, and
-            // loaded again at the next press. The second load must work as the first did.
-            for (int run = 1; run <= 2; run++)
+            foreach (bool fast in new[] { false, true })
             {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                 var watch = Stopwatch.StartNew();
-                await recognizer.PreloadAsync(options, timeout.Token);
-                AppLog.Info($"Smoke test: model loaded ({run}) in {watch.Elapsed.TotalSeconds:0.0} s");
-                watch.Restart();
-                IReadOnlyList<string> segments = await recognizer.TranscribeAsync(padded, options, timeout.Token);
+                IReadOnlyList<string> segments = await recognizer.TranscribeAsync(
+                    padded, new SpeechOptions(modelPath, "en", UseGpu: true, FastRecognition: fast), timeout.Token);
                 // Synthetic audio, so the text may be logged
                 string text = TranscriptText.Clean(segments);
-                AppLog.Info($"Smoke test: transcribed ({run}) in {watch.Elapsed.TotalSeconds:0.0} s: \"{text}\"");
+                int audioContext = fast ? WhisperAudioContext.For(padded.Length) : WhisperAudioContext.Full;
+                AppLog.Info($"Smoke test: transcribed with audio context {audioContext} in {watch.Elapsed.TotalSeconds:0.00} s: \"{text}\" " +
+                    $"(parts: \"{string.Join("\" | \"", segments)}\")");
                 if (audioPath != null && !text.Contains("hello", StringComparison.OrdinalIgnoreCase))
-                    AppLog.Error($"Smoke test: the recording of \"hello world\" was not recognized ({run})");
+                    AppLog.Error($"Smoke test: the recording of \"hello world\" was not recognized with audio context {audioContext}");
+                // A short audio context makes Whisper prone to saying it all again
+                int first = text.IndexOf("hello", StringComparison.OrdinalIgnoreCase);
+                if (first >= 0 && text.IndexOf("hello", first + 1, StringComparison.OrdinalIgnoreCase) >= 0)
+                    AppLog.Error($"Smoke test: the phrase came out repeated with audio context {audioContext}");
+            }
+            // Both audio contexts share the whisper state created with the model
+            if (recognizer.StatesCreated != 1)
+                AppLog.Error($"Smoke test: {recognizer.StatesCreated} whisper states created for one model");
+
+            // Dictation frees the model once it is idle and loads it again at the next press (ahead of the
+            // transcription, as a press does): the second load, with its own state, must work as the first did
+            using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30)))
+            {
+                var options = new SpeechOptions(modelPath, "en", UseGpu: true, FastRecognition: true);
+                await recognizer.UnloadAsync();
+                var watch = Stopwatch.StartNew();
+                await recognizer.PreloadAsync(options, timeout.Token);
+                AppLog.Info($"Smoke test: model loaded again in {watch.Elapsed.TotalSeconds:0.00} s");
+                string text = TranscriptText.Clean(await recognizer.TranscribeAsync(padded, options, timeout.Token));
+                AppLog.Info($"Smoke test: transcribed after loading again: \"{text}\"");
+                if (audioPath != null && !text.Contains("hello", StringComparison.OrdinalIgnoreCase))
+                    AppLog.Error("Smoke test: the recording of \"hello world\" was not recognized after loading the model again");
+                if (recognizer.StatesCreated != 2)
+                    AppLog.Error($"Smoke test: {recognizer.StatesCreated} whisper states created for two loads");
                 await recognizer.UnloadAsync();
             }
         }

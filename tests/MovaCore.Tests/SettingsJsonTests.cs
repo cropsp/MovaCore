@@ -101,8 +101,11 @@ namespace MovaCore.Tests
             Assert.Equal("auto", settings.SpeechLanguage);
             Assert.Null(settings.SpeechMicrophoneId);
             Assert.True(settings.SpeechUseGpu);
+            Assert.Null(settings.SpeechGpu);
+            Assert.True(settings.SpeechFastRecognition);
             Assert.Equal(ModelUnloadTimeout.After5Minutes, settings.SpeechModelUnload);
             Assert.True(settings.SpeechShowOverlay);
+            Assert.False(settings.SpeechHistoryOnDisk); // the phrases stay in memory unless the user asks
         }
 
         // Until v1.2 the converted text was selected again by default, and every saved file says so: that value is not
@@ -174,8 +177,11 @@ namespace MovaCore.Tests
             SpeechLanguage = "uk",
             SpeechMicrophoneId = "{0.0.1.00000000}.{a1b2c3}",
             SpeechUseGpu = false,
+            SpeechGpu = "NVIDIA GeForce RTX 4060",
+            SpeechFastRecognition = false,
             SpeechModelUnload = ModelUnloadTimeout.After15Minutes,
             SpeechShowOverlay = false,
+            SpeechHistoryOnDisk = true,
         };
 
         [Fact]
@@ -206,8 +212,11 @@ namespace MovaCore.Tests
             Assert.Equal("uk", restored.SpeechLanguage);
             Assert.Equal("{0.0.1.00000000}.{a1b2c3}", restored.SpeechMicrophoneId);
             Assert.False(restored.SpeechUseGpu);
+            Assert.Equal("NVIDIA GeForce RTX 4060", restored.SpeechGpu);
+            Assert.False(restored.SpeechFastRecognition);
             Assert.Equal(ModelUnloadTimeout.After15Minutes, restored.SpeechModelUnload);
             Assert.False(restored.SpeechShowOverlay);
+            Assert.True(restored.SpeechHistoryOnDisk);
         }
 
         // Guards the round trip above: a property added to AppSettings must get a non-default value there

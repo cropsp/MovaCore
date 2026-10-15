@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -15,7 +16,8 @@ namespace MovaCore.Services
     /// for as long as the settings say (as in Handy, 5 minutes by default) and is loaded again at the next press, while
     /// the user speaks. Hotkey events arrive on the hook thread, which must not block, so every event becomes a command
     /// processed in order by one worker loop; transcription runs beside the loop so that a cancellation is handled at
-    /// once.
+    /// once. A press is taken at any time: while earlier phrases are still being recognized or pasted, the next one is
+    /// recorded, and the phrases are recognized and pasted one after another, in the order they were said.
     /// </summary>
     public sealed class SpeechOrchestrator : IDisposable
     {
@@ -23,6 +25,7 @@ namespace MovaCore.Services
         private readonly ISpeechRecognizer _recognizer;
         private readonly ISpeechDetector? _detector;
         private readonly DictationContext? _context;
+        private readonly DictationHistory? _history;
         private readonly TextPaster _paster;
         private readonly Channel<Command> _commands =
             Channel.CreateUnbounded<Command>(new UnboundedChannelOptions { SingleReader = true });
@@ -30,37 +33,56 @@ namespace MovaCore.Services
         private readonly Task _loop;
         private volatile SpeechSettings _settings = SpeechSettings.Disabled;
         private volatile SpeechState _state = SpeechState.Idle;
-        private (string? Path, bool Gpu)? _configuredModel; // the model Configure last applied; only a new one is preloaded
+        private (string? Path, bool Gpu, string? GpuName)? _configuredModel; // the model Configure last applied; only a new one is preloaded
 
         // Owned by the loop
-        private int _generation; // identifies the current dictation; a cancelled one's late results are ignored
-        private CancellationTokenSource? _workCts; // the current dictation's time limit and transcription
+        private int _generation; // identifies the current recording, and then its phrase
+        private CancellationTokenSource? _recordingCts; // the current recording's time limit and trailing audio
         private SpeechOptions? _options;
         private bool _restoreClipboard;
         private long _recordingStarted;
         private TimeSpan _held; // how long the hotkey was held, once it is released
         private bool _finishing; // released; the last moments are still being recorded
-        private bool _ignoreNextRelease;
         private int _closeTicket; // identifies the pending close of the microphone; a press makes it stale
         private int _unloadTicket; // identifies the pending unload of the model; a press makes it stale
+        private readonly List<Phrase> _phrases = new(); // recorded, not yet recognized and pasted; oldest first
+        private Task _lastPhrase = Task.CompletedTask; // the next phrase starts after it, so phrases are pasted in order
+        private PhraseResult? _earlierFailure; // a phrase that failed while later ones were under way: reported at the end
+
+        private volatile int _newestPhrase; // read by the phrases themselves
         private bool _detectorFailed;
 
         /// <param name="detector">Voice activity detection; without it, an energy threshold decides what is silence.</param>
         /// <param name="context">The previous dictation, which the next phrase may continue; without it, none does.</param>
+        /// <param name="history">Gets every recognized phrase, pasted or not.</param>
         public SpeechOrchestrator(
             IAudioRecorder recorder, ISpeechRecognizer recognizer, TextPaster paster, ISpeechDetector? detector = null,
-            DictationContext? context = null)
+            DictationContext? context = null, DictationHistory? history = null)
         {
             _recorder = recorder;
             _recognizer = recognizer;
             _paster = paster;
             _detector = detector;
             _context = context;
+            _history = history;
             _loop = Task.Run(RunAsync);
         }
 
         /// <summary>Raised on a worker thread.</summary>
         public event EventHandler<SpeechStateChangedEventArgs>? StateChanged;
+
+        /// <summary>
+        /// The text has just been pasted (the paste keys went out), on a worker thread: the final <see cref="StateChanged"/>
+        /// follows once the clipboard is back, a moment later. Only for the newest phrase, and not while the next one is
+        /// being recorded: the indicator stays for those.
+        /// </summary>
+        public event EventHandler? TextPasted;
+
+        /// <summary>
+        /// A phrase took long to recognize (<see cref="IsSlow"/>), on a worker thread: the user may not know that a faster
+        /// setting, the graphics card or its driver would help.
+        /// </summary>
+        public event EventHandler? RecognitionSlow;
 
         public SpeechState State => _state;
 
@@ -82,6 +104,14 @@ namespace MovaCore.Services
         internal TimeSpan MaxRecording { get; init; } = TimeSpan.FromMinutes(2);
 
         internal static TimeSpan MinAudioLength { get; } = TimeSpan.FromSeconds(1.25);
+
+        /// <summary>
+        /// Recognition is slow when the text comes over 4 s after the release and later than half as long again as the
+        /// speech took. A phrase recognized about as fast as it was said (a processor with the short audio context) is
+        /// not; the 30-s window on a weak computer (2 s of speech in 16 s) is.
+        /// </summary>
+        internal static bool IsSlow(TimeSpan speech, TimeSpan recognition) =>
+            recognition > TimeSpan.FromSeconds(4) && recognition > speech * 1.5;
 
         /// <summary>
         /// How long the microphone stays open after a dictation: the next one starts at once, with the moment before the
@@ -118,9 +148,12 @@ namespace MovaCore.Services
             {
                 // Saving unrelated settings does not bring back a model freed for being idle; a model freed after every
                 // dictation is never loaded ahead of time
-                (string?, bool) model = (settings.ModelPath, settings.UseGpu);
+                (string?, bool, string?) model = (settings.ModelPath, settings.UseGpu, settings.GpuName);
                 if (_configuredModel != model && settings.UnloadAfter != TimeSpan.Zero)
-                    Post(new PreloadRequested(new SpeechOptions(settings.ModelPath!, settings.Language, settings.UseGpu)));
+                {
+                    Post(new PreloadRequested(new SpeechOptions(
+                        settings.ModelPath!, settings.Language, settings.UseGpu, settings.FastRecognition, settings.GpuName)));
+                }
                 _configuredModel = model;
                 Post(new UnloadPolicyChanged());
             }
@@ -154,8 +187,7 @@ namespace MovaCore.Services
                 {
                     AppLog.Error("Dictation failed", ex);
                     if (_recorder.IsRecording) StopRecorderQuietly();
-                    _workCts?.Cancel();
-                    _generation++;
+                    CancelAll();
                     SetIdle(SpeechOutcome.Failed, SpeechError.Failed, ex.Message);
                 }
             }
@@ -184,8 +216,8 @@ namespace MovaCore.Services
                     StopRecorderQuietly();
                     Fail(failed.Error);
                     break;
-                case WorkDone done when done.Generation == _generation && _state == SpeechState.Transcribing:
-                    SetIdle(done.Outcome, done.Error, done.Detail);
+                case WorkDone done:
+                    OnPhraseDone(done);
                     break;
                 case PreloadRequested preload:
                     _ = PreloadAsync(preload.Options, generation: null);
@@ -205,10 +237,13 @@ namespace MovaCore.Services
 
         private void OnPressed()
         {
-            // A press during transcription (or the last moments of a recording) is ignored, and so is its release
-            if (_state == SpeechState.Transcribing || _finishing) _ignoreNextRelease = true;
-            if (_state != SpeechState.Idle) return;
-            _ignoreNextRelease = false;
+            // Pressed again right after the release: the trailing audio is cut short, and the next phrase starts now
+            if (_finishing)
+            {
+                AppLog.Info("Dictation: pressed again during the trailing audio of the previous phrase");
+                OnFinish();
+            }
+            if (_state == SpeechState.Recording) return;
             _closeTicket++; // the microphone is needed again
             _unloadTicket++; // and so is the model
 
@@ -226,12 +261,15 @@ namespace MovaCore.Services
                     return;
             }
 
+            // Taken anyway: people press again without looking whether the previous text is in
+            if (_phrases.Count > 0)
+                AppLog.Info($"Dictation: pressed while {_phrases.Count} phrase(s) were still being recognized or pasted");
+
             int generation = ++_generation;
-            _options = new SpeechOptions(settings.ModelPath!, settings.Language, settings.UseGpu);
+            _options = new SpeechOptions(settings.ModelPath!, settings.Language, settings.UseGpu, settings.FastRecognition, settings.GpuName);
             _restoreClipboard = settings.RestoreClipboard;
             _recordingStarted = Stopwatch.GetTimestamp();
-            _workCts?.Dispose();
-            _workCts = new CancellationTokenSource();
+            _recordingCts = new CancellationTokenSource();
             // Shown at once: opening the microphone can take a moment, and the user should see the press was taken
             SetState(new SpeechStateChangedEventArgs(SpeechState.Recording));
 
@@ -248,7 +286,7 @@ namespace MovaCore.Services
 
             // Normally loaded already (see Configure); otherwise it loads while the user speaks
             _ = PreloadAsync(_options, generation);
-            _ = Task.Delay(MaxRecording, _workCts.Token).ContinueWith(
+            _ = Task.Delay(MaxRecording, _recordingCts.Token).ContinueWith(
                 t => Post(new Released(generation)), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion,
                 TaskScheduler.Default);
         }
@@ -256,11 +294,6 @@ namespace MovaCore.Services
         /// <param name="limitGeneration">Set when the time limit ended the recording, null for the hotkey release.</param>
         private void OnReleased(int? limitGeneration)
         {
-            if (limitGeneration == null && _ignoreNextRelease)
-            {
-                _ignoreNextRelease = false;
-                return;
-            }
             if (_state != SpeechState.Recording || _finishing || (limitGeneration != null && limitGeneration != _generation)) return;
             if (limitGeneration != null) AppLog.Info("Dictation: the recording reached its time limit");
 
@@ -272,7 +305,7 @@ namespace MovaCore.Services
                 return;
             }
             int generation = _generation;
-            _ = Task.Delay(TrailingAudio, _workCts!.Token).ContinueWith(
+            _ = Task.Delay(TrailingAudio, _recordingCts!.Token).ContinueWith(
                 t => Post(new FinishRecording(generation)), CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion,
                 TaskScheduler.Default);
         }
@@ -308,8 +341,32 @@ namespace MovaCore.Services
             // Levels only, never the audio: they tell a quiet microphone from a problem elsewhere
             AppLog.Info($"Dictation: {audio.TotalSeconds:0.0} s recorded, peak {AudioSamples.ToDecibels(peak):0} dBFS, " +
                 $"RMS {AudioSamples.ToDecibels(AudioSamples.Rms(samples)):0} dBFS");
+            StopRecordingTimers();
+            var phrase = new Phrase(_generation, new CancellationTokenSource());
+            _phrases.Add(phrase);
+            _newestPhrase = phrase.Generation;
             SetState(new SpeechStateChangedEventArgs(SpeechState.Transcribing));
-            _ = TranscribeAsync(samples, _options!, _restoreClipboard, NoSpeechOutcome(), _generation, _workCts!.Token);
+            _lastPhrase = TranscribeAfterAsync(
+                _lastPhrase, samples, _options!, _restoreClipboard, NoSpeechOutcome(), phrase.Generation, phrase.Cts.Token);
+        }
+
+        // The phrase is done: once the last one is, and nothing is being recorded, the dictation is
+        private void OnPhraseDone(WorkDone done)
+        {
+            int index = _phrases.FindIndex(phrase => phrase.Generation == done.Generation);
+            if (index < 0) return; // cancelled
+            _phrases[index].Cts.Dispose();
+            _phrases.RemoveAt(index);
+
+            var result = new PhraseResult(done.Outcome, done.Error, done.Detail);
+            if (_state == SpeechState.Recording || _phrases.Count > 0)
+            {
+                if (done.Outcome == SpeechOutcome.Failed) _earlierFailure ??= result;
+                return;
+            }
+            PhraseResult report = _earlierFailure ?? result;
+            _earlierFailure = null;
+            SetIdle(report.Outcome, report.Error, report.Detail);
         }
 
         private void OnCancel()
@@ -317,10 +374,26 @@ namespace MovaCore.Services
             if (_state == SpeechState.Idle) return;
 
             if (_state == SpeechState.Recording) StopRecorderQuietly();
-            _workCts?.Cancel();
-            _generation++;
+            CancelAll();
             AppLog.Info("Dictation cancelled");
             SetIdle(SpeechOutcome.Cancelled);
+        }
+
+        // The recording and every phrase not yet pasted; their late results are ignored
+        private void CancelAll()
+        {
+            StopRecordingTimers();
+            foreach (Phrase phrase in _phrases) phrase.Cts.Cancel(); // not disposed: the phrase may still be using it
+            _phrases.Clear();
+            _earlierFailure = null;
+            _generation++;
+        }
+
+        private void StopRecordingTimers()
+        {
+            _recordingCts?.Cancel();
+            _recordingCts?.Dispose();
+            _recordingCts = null;
         }
 
         /// <param name="generation">The dictation waiting for the model, or null for a load ahead of time.</param>
@@ -356,6 +429,21 @@ namespace MovaCore.Services
             }
         }
 
+        // One phrase at a time, so that they are pasted in the order they were said and each can continue the one before
+        private async Task TranscribeAfterAsync(Task previous, float[] samples, SpeechOptions options, bool restoreClipboard,
+            SpeechOutcome noSpeech, int generation, CancellationToken cancellationToken)
+        {
+            try
+            {
+                await previous.ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // A phrase reports its outcome instead of failing; nothing to wait for then
+            }
+            await TranscribeAsync(samples, options, restoreClipboard, noSpeech, generation, cancellationToken);
+        }
+
         private async Task TranscribeAsync(float[] samples, SpeechOptions options, bool restoreClipboard,
             SpeechOutcome noSpeech, int generation, CancellationToken cancellationToken)
         {
@@ -376,9 +464,17 @@ namespace MovaCore.Services
                     IReadOnlyList<string> segments = await _recognizer.TranscribeAsync(audio, options, cancellationToken);
                     string text = TranscriptText.Clean(segments);
 
-                    // Never log the text itself: it is what the user said
-                    AppLog.Info($"Dictation: {AudioSamples.Duration(speech.Length).TotalSeconds:0.0} s of speech transcribed in " +
-                        $"{Stopwatch.GetElapsedTime(started).TotalSeconds:0.00} s, {text.Length} characters");
+                    // Never log the text itself: it is what the user said. The parts and the characters before cleaning
+                    // (joined with a space, as Clean joins them, so that the two counts match when nothing was dropped)
+                    // tell whether Whisper repeated itself.
+                    int audioContext = options.FastRecognition ? WhisperAudioContext.For(audio.Length) : WhisperAudioContext.Full;
+                    int recognized = string.Join(' ', segments.Select(s => s.Trim()).Where(s => s.Length > 0)).Length;
+                    TimeSpan speechDuration = AudioSamples.Duration(speech.Length);
+                    TimeSpan recognition = Stopwatch.GetElapsedTime(started);
+                    AppLog.Info($"Dictation: {speechDuration.TotalSeconds:0.0} s of speech transcribed in " +
+                        $"{recognition.TotalSeconds:0.00} s (audio context {audioContext}), " +
+                        $"{segments.Count} part(s), {text.Length} characters of {recognized}");
+                    if (IsSlow(speechDuration, recognition)) RecognitionSlow?.Invoke(this, EventArgs.Empty);
                     Array.Clear(speech);
                     Array.Clear(audio);
 
@@ -389,9 +485,16 @@ namespace MovaCore.Services
                     else
                     {
                         cancellationToken.ThrowIfCancellationRequested();
+                        string phrase = text;
                         // A phrase that continues the previous dictation gets a space, and no capital mid-sentence
                         text = TranscriptJoiner.Join(_context?.TextBefore(), text);
-                        PasteResult result = await _paster.PasteAsync(text, restoreClipboard);
+                        PasteResult result = await _paster.PasteAsync(text, restoreClipboard, () =>
+                        {
+                            if (generation == _newestPhrase && _state != SpeechState.Recording)
+                                TextPasted?.Invoke(this, EventArgs.Empty);
+                        });
+                        // As recognized: that is what the user would paste somewhere else
+                        _history?.Add(phrase, result == PasteResult.Pasted, DateTime.Now);
                         if (result == PasteResult.Pasted)
                             _context?.Remember(text);
                         else
@@ -469,15 +572,26 @@ namespace MovaCore.Services
         private void Discard(string reason, SpeechOutcome outcome)
         {
             AppLog.Info($"Dictation discarded: {reason}");
-            _workCts?.Cancel();
-            SetIdle(outcome == SpeechOutcome.Discarded || _held >= NoticeableHold ? outcome : SpeechOutcome.Discarded);
+            EndWithoutPhrase(outcome == SpeechOutcome.Discarded || _held >= NoticeableHold ? outcome : SpeechOutcome.Discarded);
         }
 
         private void Fail(Exception ex)
         {
             (SpeechOutcome outcome, SpeechError? error, string? detail) = Describe(ex);
-            _workCts?.Cancel();
-            SetIdle(outcome, error, detail);
+            EndWithoutPhrase(outcome, error, detail);
+        }
+
+        // The recording gave nothing to recognize; earlier phrases may still be on their way
+        private void EndWithoutPhrase(SpeechOutcome outcome, SpeechError? error = null, string? detail = null)
+        {
+            StopRecordingTimers();
+            if (_phrases.Count == 0)
+            {
+                SetIdle(outcome, error, detail);
+                return;
+            }
+            if (outcome == SpeechOutcome.Failed) _earlierFailure ??= new PhraseResult(outcome, error, detail);
+            if (_state != SpeechState.Transcribing) SetState(new SpeechStateChangedEventArgs(SpeechState.Transcribing));
         }
 
         // Conditions the user can fix are logged as information; anything else is a bug
@@ -525,7 +639,8 @@ namespace MovaCore.Services
         }
 
         // The model takes hundreds of megabytes (on the graphics card with the GPU option), which games and other
-        // applications may need: it is freed once dictation has not used it for a while (Handy does the same)
+        // applications may need: it is freed once dictation has not used it for a while (Handy does the same). Idle
+        // means no phrase is left either: SetIdle comes only after the last one is pasted.
         private void ScheduleUnload()
         {
             int ticket = ++_unloadTicket;
@@ -573,10 +688,14 @@ namespace MovaCore.Services
             {
                 // Errors inside the loop are logged there
             }
-            _workCts?.Cancel();
+            _recordingCts?.Cancel();
+            foreach (Phrase phrase in _phrases) phrase.Cts.Cancel();
             if (_recorder.IsRecording) StopRecorderQuietly();
             CloseRecorderQuietly();
         }
+
+        private sealed record Phrase(int Generation, CancellationTokenSource Cts);
+        private sealed record PhraseResult(SpeechOutcome Outcome, SpeechError? Error, string? Detail);
 
         private abstract record Command;
         private sealed record Pressed : Command;

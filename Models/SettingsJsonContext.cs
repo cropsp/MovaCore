@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
 namespace MovaCore.Models
@@ -6,6 +7,7 @@ namespace MovaCore.Models
     // Numeric values written by v1.0 still load, because the string enum converter also accepts integers.
     [JsonSourceGenerationOptions(WriteIndented = true, UseStringEnumConverter = true)]
     [JsonSerializable(typeof(AppSettings))]
+    [JsonSerializable(typeof(List<DictationEntry>))] // the dictation history, when it is kept on disk
     internal partial class SettingsJsonContext : JsonSerializerContext
     {
     }

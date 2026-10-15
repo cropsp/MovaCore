@@ -12,7 +12,9 @@ Native AOT cannot embed (SharpHook's `uiohook.dll`, the Whisper runtimes in `run
 The root namespace is `MovaCore`.
 
 A prioritized review of known bugs and the roadmap lives in `docs/IMPROVEMENT_PLAN.md` (in Ukrainian); check it
-before changing behaviour, since many "odd" things in the code are already catalogued there.
+before changing behaviour, since many "odd" things in the code are already catalogued there. Its section "Стан після v1.2.0
+і план наступних робіт" is the hand-off between sessions: what is on the branch but not released, what the owner
+decided, what the testers' logs showed, and the next stages (whisper state reuse, GPU picker, first-run guide).
 
 ## Commands
 
@@ -42,7 +44,12 @@ CI (`.github/workflows/ci.yml`, Windows runners) is the only place the real app 
 arm64) and smoke-tested; its job summary lists the publish output sizes and the AOT/trim warnings (all currently from
 WinForms itself). After publishing, `eng/copy-vc-runtime.ps1` copies the VC++ runtime next to the Whisper DLLs and
 `eng/check-native-deps.ps1` fails if any shipped binary imports a DLL a clean PC may lack (`publish.ps1` runs both
-too). The smoke test transcribes a synthesized "hello world" with the cached `ggml-tiny.bin`. Pushing a `v*` tag creates a draft release with zip archives and SHA256 sums; the tag must match
+too). The smoke test transcribes a synthesized "hello world" with the cached `ggml-tiny.bin`. Every build says which
+it is: the `WriteBuildInfo` target in `MovaCore.csproj` writes `BuildInfo` (generated `obj/.../BuildInfo.g.cs`: CI's
+run number `GITHUB_RUN_NUMBER`, the commit and the date; empty number and commit locally), shown
+by `Strings.BuildLabel` in the settings header and About and in the log's first line; the run number is also the file
+version's fourth part and in the artifact names (`MovaCore-win-x64-build57`), and the smoke test checks it against CI's
+variables. Pushing a `v*` tag creates a draft release with zip archives and SHA256 sums; the tag must match
 `<Version>` in `MovaCore.csproj`, and the notes come from that version's `CHANGELOG.md` section
 (`docs/RELEASING.md`). For tags, CI sends `MovaCore.exe` (only our own file) to SignPath Foundation for signing once
 the repository variable `SIGNPATH_ORGANIZATION_ID` is set, and skips that until then (`docs/CODE_SIGNING.md`, whose
@@ -107,14 +114,22 @@ Dictation (hold-to-talk) reuses the hook, the clipboard service and the paste:
   those without a signal (peak < −60 dBFS: `NoSignal`), keep the speech found by `ISpeechDetector` (`NoSpeech` if
   none; without a detector the energy threshold `AudioSamples.IsSilent` decides: Whisper invents text for silence),
   pad to 1.25 s, `ISpeechRecognizer.TranscribeAsync` beside the loop, `TranscriptText.Clean` (also drops
-  hesitations and 3+ repeated words), then **`TextPaster`** (snapshot, set, Ctrl+V, wait for the read, restore; a
+  hesitations, 3+ repeated words and parts that start over; the log gives the parts and characters, never the text), then **`TextPaster`** (snapshot, set, Ctrl+V, wait for the read, restore; a
   read before the paste, e.g. by a clipboard manager, hides the paste itself, so it then restores after a pause; it
   waits for the `ClipboardGate` instead of dropping the text). `NoSpeech`/`NoSignal` are reported only after a hold
-  of ≥ 1 s. It keeps the microphone open for 30 s after a dictation (`KeepMicrophoneOpen`), loads the model when
+  of ≥ 1 s. A press is taken at any time: a released recording becomes a phrase in a queue (`_phrases`,
+  `TranscribeAfterAsync` waits for the one before), so the next phrase is recorded while earlier ones are still
+  recognized or pasted, and they paste in order; a press during the trailing audio ends that phrase at once, `Cancel`
+  drops the recording and the queue, an earlier phrase's failure is reported when the last one is done, and
+  `TextPasted` comes only for the newest phrase and not while the next is being recorded. Every recognized phrase,
+  pasted or not, goes to `DictationHistory` (the last 10, newest first, for the tray menu's Last phrases, where a
+  click copies one): in memory, and in `%LOCALAPPDATA%\MovaCore\history.json` only with
+  `AppSettings.SpeechHistoryOnDisk` (off by default; turning it off deletes the file); never in the log. It keeps the microphone
+  open for 30 s after a dictation (`KeepMicrophoneOpen`), loads the model when
   a model is newly configured (not on every settings save), frees it after `SpeechSettings.UnloadAfter` without a
   dictation (`ModelUnloadTimeout`, 5 min by default as in Handy; `Immediately` frees it after every dictation and never
-  preloads; a press loads it again while the user speaks) and at once when dictation is turned off or the model file
-  is gone, enforces a 2-minute limit (a
+  preloads; a press loads it again while the user speaks; queued phrases keep it) and at once when dictation is turned
+  off or the model file is gone, enforces a 2-minute limit (a
   release during a UAC prompt is never seen) and reports `StateChanged` (state, outcome, `SpeechError`) on a worker
   thread. Before pasting, `TranscriptJoiner` fits the phrase to `DictationContext`: the last dictated text, valid
   only while the focus (`IDictationTarget`, i.e. `WindowsDictationTarget`: `GetGUIThreadInfo`) is unchanged and the
@@ -129,8 +144,35 @@ Dictation (hold-to-talk) reuses the hook, the clipboard service and the paste:
   (`RuntimeOptions.ForcedRuntimeLibrary`): Vulkan if the GPU option is on and `vulkan-1.dll` loads (with
   `VK_LOADER_LAYERS_DISABLE=~implicit~`: overlay layers crash Vulkan apps), else the CPU, and on x64 only after an
   AVX2/FMA/F16C check (ggml's CPU code dies with an illegal instruction without them). A model loaded on the GPU gets
-  one warm-up run (shader compilation) per process: ggml keeps the Vulkan device and its compiled shaders after the
-  model is freed, so a reload needs none. It is also the `ISpeechDetector`: whisper.cpp's Silero VAD with
+  one warm-up run (shader compilation) per model and card in a process (ggml keeps each card's Vulkan device and its
+  compiled shaders after the model is freed, so a reload needs none), and every model loads with flash attention. Whisper encodes a 30-s window
+  (1500 positions) however short the phrase, which takes many seconds on a weak computer; with
+  `SpeechFastRecognition` (experimental, on by default) a phrase is encoded with the audio context
+  `WhisperAudioContext.For` its length (steps of 5.12 s after a 1 s margin, whisper.cpp's `audio_ctx`). A short
+  context makes Whisper repeat the phrase once it is done, so such calls get a single segment and a token ceiling
+  (`audioContext / 4`), and `TranscriptText` drops a phrase of three or more words repeated right after itself.
+  Whisper.net loads the model, but transcription bypasses its `WhisperProcessor`, which creates and frees a whisper
+  state (the compute buffers: half the time of a short phrase on a GPU) on every call: `WhisperNative` calls whisper.cpp
+  through function pointers from the `whisper.dll` that `ChooseRuntime` loaded (the module Whisper.net uses), with one
+  state per loaded model, since `whisper_full_with_state` takes the audio context per call. The model's context comes
+  from Whisper.net's private `WhisperFactory.contextLazy` (`UnsafeAccessor`), and `WhisperFullParams` mirrors
+  whisper.cpp's struct, passed by value: when upgrading Whisper.net, check both against its source and bundled
+  `whisper.h` (`WhisperFullParamsTests` holds the size and offsets). The graphics card: `VulkanDevices` lists the
+  discrete and integrated cards through `vulkan-1.dll` in Vulkan's order, as ggml-vulkan does (once per process; the
+  settings form gets the list), `GpuChoice.Pick` takes the chosen one by name (`AppSettings.SpeechGpu`, null:
+  automatic) or else the discrete card with the most memory, and its position goes to whisper.cpp as `gpu_device`
+  (`WhisperFactoryOptions.GpuDevice`) when the model loads, so another card means a reload, not a restart. Not
+  `GGML_VK_VISIBLE_DEVICES`: ggml reads it with the CRT's `getenv`, which may not see a change made from .NET. A discrete
+  card with at least 4 GB decodes with beam search (5 beams, `GpuChoice.UseBeamSearch`); other cards and the CPU greedily. If the decoders' cache does not fit, `whisper_full_with_state` frees the state
+  itself and returns -7; the recognizer then drops it without freeing it again. The text comes back in the parts
+  Whisper marked with timestamps (`WhisperNative.ReadParts`; a part is decoded from its bytes whole, since tokens split
+  Cyrillic letters): Whisper repeats a phrase when it thinks audio follows the speech, as a part of its own, and
+  `TranscriptText` drops a part that repeats where an earlier part began, wholly or cut short. `ChooseRuntime` runs
+  before any model loads, with the GPU option off too, or Whisper.net would pick a runtime itself. `OnNativeLog` keeps whisper.cpp's
+  warnings and errors plus ggml's device lines (Vulkan device and its type, buffers), each distinct line once. Whisper
+  computes with one thread per physical core (`WhisperThreads`: at most 8, 4 for the VAD; cores counted with
+  `GetLogicalProcessorInformationEx`), since a core's second SMT thread only competes for its arithmetic. It is
+  also the `ISpeechDetector`: whisper.cpp's Silero VAD with
   `models\ggml-silero-v6.2.0.bin` next to the exe, which `eng/get-vad-model.ps1` puts into the publish output (CI and
   `publish.ps1`; a plain `dotnet build` has none, so the energy threshold is used).
 - **`Services/ModelDownloader.cs`** is the only network code: it downloads a `SpeechModelCatalog` model from
@@ -146,8 +188,9 @@ Dictation (hold-to-talk) reuses the hook, the clipboard service and the paste:
   would call `SetLayeredWindowAttributes`, after which `UpdateLayeredWindow` fails), and draw text with GDI+, not
   `TextRenderer` (GDI text has no alpha). It draws `UI/MouseScene.cs`: the
   logo's field mouse in grass whose tufts are the equalizer (`SpectrumAnalyzer`, Handy's algorithm), grey with the
-  mouse dozing until the microphone delivers, the mouse gnawing wheat if transcribing takes over 0.3 s, a wink when
-  pasted, or the mouse's head beside a short message; it fades in and out. The scene was designed as a browser mockup
+  mouse dozing until the microphone delivers, the mouse gnawing wheat if transcribing takes over 0.3 s, or the mouse's
+  head beside a short message; it fades in, and fades out the moment the text is pasted (`TextPasted`, raised by
+  `TextPaster`'s `onPasted` right after the paste keys, before the clipboard is restored). The scene was designed as a browser mockup
   first; keep its proportions (152 x 44 logical pixels) when changing it. Errors the user can fix
   (`SpeechException`: no model, no microphone, unsupported CPU…) are logged as Info, not Error; never log what was
   said or the audio.
@@ -157,11 +200,21 @@ Settings: `Services/SettingsService.cs` stores `Models/AppSettings` as JSON in `
 (`HKCU\...\Run`) lives behind `IStartupRegistration` (`StartupRegistration.cs`) and is the source of truth for
 `LaunchAtStartup`; `Load` re-points it at the running exe only when the registered exe no longer exists.
 `UI/SettingsForm.cs` is built in code (no designer file) from auto-sizing `TableLayoutPanel`s with
-`AutoScaleMode.Dpi`, on three tabs (Layout, Voice, General); a `TabControl` does not size itself, so
+`AutoScaleMode.Dpi`, on three tabs (Layout, Voice, General; the Voice tab's graphics card list replaces the old
+GPU checkbox: Automatic, the cards, Processor only); a `TabControl` does not size itself, so
 `FitTabsToPages` sizes it from the largest page. Both hotkeys are recorded by `UI/HotkeyPicker` through
 `IHotkeyService.CaptureHotkeyAsync`, which refuses a combination the other hotkey uses. `OnSaveClick` builds a new
 `AppSettings`: a field it does not copy resets to its default. The tray offers Settings, Pause
-(stops the hook; not persisted), About and Exit, and only one settings window at a time.
+(stops the hook; not persisted), First steps, About and Exit, and only one window (settings or first steps) at a time.
+`UI/FirstStepsForm.cs` opens at the first run (`SettingsService.IsFirstRun`: no settings file; saving ends it, so
+closing the window saves) and from the tray: the hotkey tried on "ghbdsn" in a text box of its own (the global
+hotkey works in our own windows), voice input turned on with `HotkeyPicker.StartCapture` (turning it on in Settings
+asks for the key too), its model download, how to pin the tray icon (`ms-settings:taskbar`) and autostart; it changes
+a `Clone` of the settings. The shared layout helpers live in `UI/FormLayout.cs`. Hints are balloons shown once a
+session: `HotkeyOrchestrator.NothingSelected`, and `SpeechOrchestrator.RecognitionSlow` (`IsSlow`) with the advice
+from `RecognitionAdvisor`. The processor's Whisper runtime stays for the process
+(`WhisperSpeechRecognizer.ProcessorRuntimeLoaded`), so choosing a card after it offers a restart: a new process with
+`--restarted-from <pid>` waits for this one to exit before the single-instance check.
 
 All user-visible text lives in `Strings.cs` (English and Ukrainian, chosen by `AppSettings.Language`, where `Auto`
 follows the Windows display language via `UI/WindowsLanguage.cs`); an in-code table keeps it simple under AOT.
@@ -176,7 +229,8 @@ editing the `.ico`/`.png` by hand.
 The README exists in English (`README.md`) and Ukrainian (`README.uk.md`) with the same sections in the same order
 and a language switcher at the top; change both together, using the UI labels from `Strings.cs`. It is written for
 users first (download, quick start, privacy, FAQ); implementation details belong in its "For developers" section.
-The animations and the social preview in `docs/media` are rendered illustrations, not screenshots.
+The animations and the social preview in `docs/media` are rendered illustrations, not screenshots: regenerate them
+with `eng/media/make-media.py` (Node + Playwright, Pillow) from the canvas pages in `eng/media` instead of editing them.
 
 One top-level type per file; interfaces live next to their implementations in `Services/`.
 

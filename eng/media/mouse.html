@@ -1,0 +1,379 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body><script>
+(() => {
+  const TAU = Math.PI * 2;
+  const W = 152, H = 44, PAD = 6;            // pill size in logical pixels, plus room for its shadow
+  const CW = W + PAD * 2, CH = H + PAD * 2;  // 164 x 56
+  const LW = 1.6;                            // outline width, as in the logo
+
+  // The logo's palette (Resources/mouse_icon.png), and a sleepy grey one
+  const WARM = { body: "#e9a257", shade: "#d97a3e", belly: "#fbf4e2", ear: "#f68c76", line: "#1b2a33", seed: "#e7be5c" };
+  const GREY = { body: "#b9b3ab", shade: "#a09990", belly: "#ece8e1", ear: "#d8ccc5", line: "#46525a", seed: "#cfc6b6" };
+  const PILLS = {
+    dark: { bg: "rgba(30,30,32,0.94)", edge: "rgba(255,255,255,0.07)", bar: "#fbf4e2", text: "#fbf4e2", rim: "rgba(251,244,226,0.75)", quiet: "rgba(251,244,226,0.3)" },
+    light: { bg: "#fbf4e2", edge: "#e2d2b4", bar: "#d97a3e", text: "#1b2a33", rim: "#1b2a33", quiet: "rgba(27,42,51,0.25)" },
+  };
+  const RED = "#e5484d", AMBER = "#f0a030";
+  const GRASS = { back: "#6fa553", front: "#9fcb6b", edge: "#2f5626", wheat: "#ecc565" };
+
+  const reduce = false;
+  const motion = reduce ? 0.35 : 1;
+
+  const STATE_NAMES = {
+    arming: "Мікрофон відкривається", recording: "Запис", transcribing: "Розпізнавання",
+    pasted: "Вставлено", nospeech: "Голосу не чути", nosignal: "Мікрофон мовчить", hidden: "Сховано",
+  };
+
+  // ---- Shared state -------------------------------------------------------------------------------
+  const ui = {
+    state: "recording", stateAt: performance.now(), speak: true, gain: 0.8, quiet: false,
+    pill: "dark", redDot: true, rise: true, scenario: null,
+  };
+  const voice = { level: 0, peek: 0, bands: new Array(9).fill(0), jitter: new Array(9).fill(1), sylEnd: 0, inSyl: false, sylStart: 0, sylAmp: 0, count: 0 };
+  let alpha = 1;
+
+  function setState(state, fromScenario = false) {
+    if (!fromScenario && ui.scenario) { ui.scenario.forEach(clearTimeout); ui.scenario = null; }
+    ui.state = state;
+    ui.stateAt = performance.now();
+    document.querySelectorAll("#states button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.state === state)));
+    document.getElementById("status-text").textContent = STATE_NAMES[state];
+  }
+
+  function runScenario() {
+    if (ui.scenario) ui.scenario.forEach(clearTimeout);
+    const steps = [["arming", 0], ["recording", 700], ["transcribing", 3900], ["pasted", 5300], ["hidden", 6300], ["recording", 7400]];
+    ui.scenario = steps.map(([state, at]) => setTimeout(() => {
+      setState(state, true);
+      if (at === 7400) ui.scenario = null;
+    }, at));
+  }
+
+  // Speech-like level: syllables of 110-240 ms, short gaps, longer pauses between words and phrases
+  function speechTarget(now) {
+    if (!ui.speak || ui.state !== "recording") return 0;
+    if (now >= voice.sylEnd) {
+      if (voice.inSyl) {
+        voice.inSyl = false;
+        voice.count++;
+        const pause = voice.count % 13 === 0 ? 650 : voice.count % 4 === 0 ? 240 + Math.random() * 180 : 45 + Math.random() * 90;
+        voice.sylEnd = now + pause;
+      } else {
+        voice.inSyl = true;
+        voice.sylStart = now;
+        voice.sylEnd = now + 110 + Math.random() * 130;
+        voice.sylAmp = 0.55 + Math.random() * 0.45;
+      }
+    }
+    if (!voice.inSyl) return 0.02 * Math.random();
+    const p = (now - voice.sylStart) / (voice.sylEnd - voice.sylStart);
+    return voice.sylAmp * Math.pow(Math.sin(Math.PI * Math.min(1, p)), 0.6) * ui.gain * (ui.quiet ? 0.3 : 1);
+  }
+
+  const PROFILE = [0.55, 0.8, 1, 0.95, 0.85, 0.72, 0.6, 0.5, 0.42];
+  function updateVoice(now, dt) {
+    const target = speechTarget(now);
+    const k = 1 - Math.exp(-dt / (target > voice.level ? 40 : 140));
+    voice.level += (target - voice.level) * k;
+    const kp = 1 - Math.exp(-dt / (voice.level > voice.peek ? 90 : 700));
+    voice.peek += (voice.level - voice.peek) * kp;
+    for (let i = 0; i < 9; i++) {
+      voice.jitter[i] += (0.7 + Math.random() * 0.6 - voice.jitter[i]) * 0.25;
+      const t = Math.min(1, voice.level * 1.25 * PROFILE[i] * voice.jitter[i]);
+      voice.bands[i] += (t - voice.bands[i]) * (1 - Math.exp(-dt / 70));
+    }
+  }
+
+  // ---- Drawing helpers ----------------------------------------------------------------------------
+  function ell(c, x, y, rx, ry, fill, stroke = true, rot = 0) {
+    c.beginPath();
+    c.ellipse(x, y, rx, ry, rot, 0, TAU);
+    if (fill) { c.fillStyle = fill; c.fill(); }
+    if (stroke) c.stroke();
+  }
+
+  function pillPath(c, x, y, w, h) {
+    const r = h / 2;
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.lineTo(x + w - r, y);
+    c.arc(x + w - r, y + r, r, -Math.PI / 2, Math.PI / 2);
+    c.lineTo(x + r, y + h);
+    c.arc(x + r, y + r, r, Math.PI / 2, Math.PI * 1.5);
+    c.closePath();
+  }
+
+  // Shapes outlined as one: strokes first at double width, then the fills cover the inner halves
+  function union(c, shapes, fill, pal) {
+    c.lineWidth = LW * 2;
+    c.strokeStyle = pal.line;
+    for (const s of shapes) { c.beginPath(); c.ellipse(s[0], s[1], s[2], s[3], s[4] || 0, 0, TAU); c.stroke(); }
+    c.fillStyle = fill;
+    for (const s of shapes) { c.beginPath(); c.ellipse(s[0], s[1], s[2], s[3], s[4] || 0, 0, TAU); c.fill(); }
+    c.lineWidth = LW;
+  }
+
+  function ear(c, x, y, r, lift, pal) {
+    c.save();
+    c.translate(x, y - lift * 0.8);
+    c.rotate(-0.3 * lift);
+    ell(c, 0, 0, r, r, pal.body);
+    ell(c, r * 0.18, r * 0.12, r * 0.6, r * 0.62, pal.ear, false);
+    c.restore();
+  }
+
+  function eye(c, x, y, mode, pal) {
+    if (mode === "open") {
+      ell(c, x, y, 1.8, 1.95, pal.line, false);
+      ell(c, x + 0.65, y - 0.75, 0.62, 0.62, "#ffffff", false);
+      return;
+    }
+    c.beginPath();
+    if (mode === "closed") { c.moveTo(x - 1.9, y - 0.2); c.quadraticCurveTo(x, y + 1.7, x + 1.9, y - 0.2); }
+    else { c.moveTo(x - 1.9, y + 0.7); c.quadraticCurveTo(x, y - 1.6, x + 1.9, y + 0.7); } // a wink
+    c.stroke();
+  }
+
+  // The logo's head, facing right; origin at the middle of the head. o: x, y, s, pal, lift, eye, chew, tilt, whisk
+  function head(c, o) {
+    const pal = o.pal;
+    c.save();
+    c.translate(o.x, o.y);
+    c.rotate(o.tilt || 0);
+    c.scale(o.s, o.s);
+    c.lineJoin = "round"; c.lineCap = "round"; c.strokeStyle = pal.line; c.lineWidth = LW;
+    ear(c, -6.6, -8.4, 6.4, o.lift || 0, pal);
+    ear(c, 3.4, -10, 5.8, (o.lift || 0) * 1.15, pal);
+    union(c, [[0, 1, 11, 9.5], [7, 3.2, 6.6, 5.6]], pal.body, pal);
+    ell(c, 7.9, 5.3, 5.4, 3.6, pal.belly, false);
+    const chew = o.chew || 0;
+    if (chew > 0) ell(c, 3.4, 5.2, 2.5 + chew * 1.5, 2 + chew * 0.9, pal.belly, false);
+    eye(c, 3.6, -1.4, o.eye || "open", pal);
+    ell(c, 13.4, 1.9, 1.75, 1.35, pal.line, false);
+    c.beginPath();
+    c.moveTo(10.6, 5.7);
+    c.quadraticCurveTo(11.8, 6.7 + chew * 1.3, 13, 5.5);
+    c.stroke();
+    const w = o.whisk || 0;
+    c.lineWidth = LW * 0.55;
+    c.beginPath();
+    c.moveTo(10.4, 3.3); c.lineTo(18, 1.2 + w);
+    c.moveTo(10.7, 4.3); c.lineTo(18.3, 4.7 + w * 0.5);
+    c.moveTo(10.5, 5.1); c.lineTo(17.4, 7.9 + w * 0.3);
+    c.stroke();
+    c.restore();
+  }
+
+  function paw(c, x, y, s, pal, rot = -0.5) {
+    c.save(); c.translate(x, y); c.scale(s, s);
+    c.lineWidth = LW; c.strokeStyle = pal.line;
+    ell(c, 0, 0, 2.3, 3, pal.body, true, rot);
+    c.restore();
+  }
+
+  function zzz(c, x, y, t, color) {
+    c.fillStyle = color;
+    for (let k = 0; k < 3; k++) {
+      const p = ((t / 1500) + k / 3) % 1;
+      c.globalAlpha = (1 - p) * 0.9;
+      c.font = `800 ${6 + p * 4}px Nunito, system-ui, sans-serif`;
+      c.fillText("z", x + p * 7, y - p * 9);
+    }
+    c.globalAlpha = 1;
+  }
+
+  function sparkle(c, x, y, t, color) {
+    const s = 3 + 1.2 * Math.sin(t / 120);
+    c.save(); c.translate(x, y); c.rotate(t / 900);
+    c.fillStyle = color;
+    c.beginPath();
+    for (let i = 0; i < 8; i++) {
+      const r = i % 2 === 0 ? s : s * 0.32;
+      const a = (i / 8) * TAU;
+      c[i ? "lineTo" : "moveTo"](Math.cos(a) * r, Math.sin(a) * r);
+    }
+    c.closePath(); c.fill();
+    c.restore();
+  }
+
+  function glyph(c, text, x, y, size, color) {
+    c.fillStyle = color;
+    c.font = `900 ${size}px Nunito, system-ui, sans-serif`;
+    c.textAlign = "center"; c.textBaseline = "middle";
+    c.fillText(text, x, y);
+    c.textAlign = "start"; c.textBaseline = "alphabetic";
+  }
+
+  function redDot(c, t) {
+    if (!ui.redDot || ui.state !== "recording") return;
+    c.globalAlpha = 0.65 + 0.35 * Math.sin(t / 260);
+    c.fillStyle = RED;
+    c.beginPath(); c.arc(W - 14, 12, 3, 0, TAU); c.fill();
+    c.globalAlpha = 1;
+  }
+
+  // ---- Variants ------------------------------------------------------------------------------------
+  function common(t) {
+    const st = ui.state, since = t - ui.stateAt;
+    const chew = st === "transcribing" ? (0.5 + 0.5 * Math.sin(t / 70)) * motion : 0;
+    return { st, since, chew, pal: st === "arming" ? GREY : WARM };
+  }
+
+  // A soft leaf of grass: it bends to one side (bend > 0: right) and ends in a rounded tip, not a point
+  function leaf(c, x, baseY, height, bend, fill, edge) {
+    const tipX = x + bend * height, tipY = baseY - height * (1 - 0.18 * Math.abs(bend));
+    const ctrlX = x + bend * height * 0.15, ctrlY = baseY - height * 0.7;
+    const point = (t) => {
+      const u = 1 - t;
+      return [u * u * x + 2 * u * t * ctrlX + t * t * tipX, u * u * baseY + 2 * u * t * ctrlY + t * t * tipY];
+    };
+    const steps = 8, left = [], right = [];
+    for (let k = 0; k <= steps; k++) {
+      const t = k / steps;
+      const [px, py] = point(t);
+      const [qx, qy] = point(Math.min(1, t + 0.01));
+      const [rx, ry] = point(Math.max(0, t - 0.01));
+      let nx = -(qy - ry), ny = qx - rx;
+      const len = Math.hypot(nx, ny) || 1;
+      nx /= len; ny /= len;
+      const half = (2.6 * (1 - t) + 0.9 * t) / 2;
+      left.push([px + nx * half, py + ny * half]);
+      right.push([px - nx * half, py - ny * half]);
+    }
+    c.beginPath();
+    c.moveTo(left[0][0], left[0][1]);
+    for (const [px, py] of left) c.lineTo(px, py);
+    c.arc(tipX, tipY, 0.45, 0, Math.PI); // the rounded tip
+    for (let k = right.length - 1; k >= 0; k--) c.lineTo(right[k][0], right[k][1]);
+    c.closePath();
+    c.fillStyle = fill; c.fill();
+    c.lineWidth = 0.8; c.strokeStyle = edge; c.lineJoin = "round"; c.stroke();
+  }
+
+  // A tuft: a taller leaf and a shorter one bending the other way, from one root
+  function tuft(c, x, baseY, height, side, fill, edge, sway) {
+    leaf(c, x + 1.2 * side, baseY, height * 0.68, -side * 0.38 + sway, fill, edge);
+    leaf(c, x, baseY, height, side * 0.22 + sway, fill, edge);
+  }
+
+  // An ear of wheat on a thin stem
+  function wheatEar(c, x, baseY, height, lean, edge) {
+    const tipX = x + lean * height, tipY = baseY - height;
+    c.lineWidth = 1; c.strokeStyle = edge;
+    c.beginPath(); c.moveTo(x, baseY); c.quadraticCurveTo(x + lean * height * 0.2, baseY - height * 0.6, tipX, tipY); c.stroke();
+    c.lineWidth = 0.8; c.strokeStyle = WARM.line;
+    for (let k = 0; k < 4; k++) {
+      const d = k * 2.6;
+      const gx = tipX - lean * d, gy = tipY + d;
+      ell(c, gx - 1.3, gy, 1.2, 2, GRASS.wheat, true, -0.5);
+      ell(c, gx + 1.3, gy, 1.2, 2, GRASS.wheat, true, 0.5);
+    }
+    ell(c, tipX, tipY - 1.8, 1.1, 1.9, GRASS.wheat, true, lean);
+  }
+
+  // The grass is the equalizer: one blade per frequency band, low on the left, all behind the mouse
+  const BLADES = 13;
+  const grassH = new Array(BLADES).fill(7);
+  function grassTarget(i, t, st) {
+    if (st === "recording") {
+      const pos = i * 8 / (BLADES - 1), lo = Math.floor(pos), hi = Math.min(8, lo + 1);
+      const band = voice.bands[lo] + (voice.bands[hi] - voice.bands[lo]) * (pos - lo);
+      return 7 + Math.pow(band, 0.8) * 25;
+    }
+    if (st === "transcribing") {
+      const mid = (BLADES - 1) / 2;
+      const delay = (mid - Math.abs(i - mid)) * 75;
+      const phase = (((t - delay) % 900) + 900) % 900 / 900;
+      return 7 + 9 * (0.5 - 0.5 * Math.cos(TAU * phase)) * motion;
+    }
+    return st === "arming" ? 6 : 7;
+  }
+
+  function drawGrass(c, t, pill) {
+    const { st, chew, pal } = common(t);
+    const x0 = 11, step = (W - 22) / (BLADES - 1), base = H + 3;
+    const still = st === "arming";
+    const colors = still ? { back: "#8f948f", front: "#aab0aa", edge: "#5d625d" }
+      : st === "transcribing" ? { back: "#d39b45", front: "#e8bb60", edge: "#8a5c1c" } : GRASS;
+    for (let i = 0; i < BLADES; i++) {
+      const sway = still ? 0 : Math.sin(t / 900 + i * 0.7) * 0.06 * motion;
+      const x = x0 + i * step;
+      if (i % 4 === 2 && !still) wheatEar(c, x + 2, base, grassH[i] + 4, 0.08 + sway, colors.edge);
+      tuft(c, x, base, grassH[i], i % 2 ? 1 : -1, i % 2 ? colors.back : colors.front, colors.edge, sway);
+    }
+
+    // The mouse sits where it is; at most a slight lift with the voice, and its ears never grow
+    const rise = ui.rise && st === "recording" ? Math.min(1, voice.peek * 1.6) * 3 * motion : 0;
+    const hop = st === "pasted" ? Math.abs(Math.sin(t / 150)) * 2 * motion : 0;
+    const hx = 60, hy = 31 - rise - hop;
+    c.lineWidth = LW;
+    union(c, [[hx - 8, hy + 12, 12, 9.5]], pal.body, pal);
+    ell(c, hx - 2.5, hy + 14, 6, 6.5, pal.belly, false);
+    head(c, {
+      x: hx, y: hy, s: 0.95, pal, chew, lift: st === "arming" ? -1 : 0,
+      eye: st === "arming" ? "closed" : st === "pasted" ? "wink" : "open",
+      tilt: st === "nospeech" ? -0.28 : 0,
+      whisk: st === "recording" ? Math.sin(t / 90) * voice.level * 1.2 * motion : 0,
+    });
+    if (st === "transcribing") {
+      wheatEar(c, hx + 17, hy + 17, 11, -0.5, GRASS.edge);
+      paw(c, hx + 11, hy + 10, 0.95, pal, 0.3);
+    }
+    if (st === "nosignal") paw(c, hx - 2, hy - 4.5, 0.95, pal, -0.9);
+
+    // A few short blades in front, at its feet
+    [[hx - 15, 9, -1], [hx - 4, 7, 1], [hx + 7, 8, 1]].forEach(([x, h, side]) =>
+      tuft(c, x, base, h, side, colors.front, colors.edge, still ? 0 : Math.sin(t / 800 + x) * 0.05 * motion));
+
+    if (st === "arming") zzz(c, hx + 11, hy - 12, t, pill.text);
+    if (st === "nospeech") glyph(c, "?", W - 28, 15, 18, pill.text);
+    if (st === "nosignal") glyph(c, "···", W - 28, 13, 16, pill.text);
+    if (st === "pasted") sparkle(c, W - 28, 14, t, AMBER);
+    redDot(c, t);
+  }
+
+  const VARIANTS = { grass: drawGrass };
+
+
+  // ---- Deterministic frames for the README animation ---------------------------------------------
+  let seed = 7;
+  Math.random = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const SCALE = 3, FPS = 20, LOOP = 7.0;
+  const TIMELINE = [[0, "arming"], [0.9, "recording"], [4.4, "transcribing"], [5.8, "hidden"]];
+  const layer = document.createElement("canvas"); layer.width = CW * SCALE; layer.height = CH * SCALE;
+  const out = document.createElement("canvas"); out.width = layer.width; out.height = layer.height;
+  const frames = [];
+  const dt = 1000 / FPS;
+  alpha = 0;
+  for (let f = 0; f < LOOP * FPS; f++) {
+    const now = f * dt;
+    const state = TIMELINE.filter(([at]) => at * 1000 <= now).pop()[1];
+    if (state !== ui.state) { ui.state = state; ui.stateAt = now; }
+    updateVoice(now, dt);
+    const targetAlpha = ui.state === "hidden" ? 0 : 1;
+    alpha += (targetAlpha - alpha) * (1 - Math.exp(-dt / (targetAlpha ? 70 : 110)));
+    for (let i = 0; i < BLADES; i++) {
+      const target = grassTarget(i, now, ui.state);
+      grassH[i] += (target - grassH[i]) * (1 - Math.exp(-dt / (target > grassH[i] ? 45 : 120)));
+    }
+    const c = layer.getContext("2d");
+    c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, layer.width, layer.height);
+    c.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+    const pill = PILLS.dark;
+    c.save(); c.translate(PAD, PAD);
+    c.save(); c.shadowColor = "rgba(0,0,0,0.28)"; c.shadowBlur = 8; c.shadowOffsetY = 2;
+    pillPath(c, 0, 0, W, H); c.fillStyle = pill.bg; c.fill(); c.restore();
+    pillPath(c, 0.5, 0.5, W - 1, H - 1); c.lineWidth = 1; c.strokeStyle = pill.edge; c.stroke();
+    pillPath(c, 0, 0, W, H); c.clip();
+    drawGrass(c, now, pill);
+    c.restore();
+    const o = out.getContext("2d");
+    o.clearRect(0, 0, out.width, out.height);
+    o.globalAlpha = Math.max(0, Math.min(1, alpha));
+    o.drawImage(layer, 0, 0);
+    frames.push(out.toDataURL("image/png"));
+  }
+  document.body.textContent = "";
+  const pre = document.createElement("pre"); pre.id = "frames"; pre.textContent = frames.join("\n");
+  document.body.appendChild(pre);
+})();
+</script></body></html>

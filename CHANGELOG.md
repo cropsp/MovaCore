@@ -10,11 +10,61 @@ All notable changes to MovaCore are documented here. The format follows
   To undo a conversion with a second press, turn on **Select the converted text** on the Layout tab. The setting
   starts off after the update too, also where it was on before.
 - The speech model is freed from memory (on the graphics card, if it is used) 5 minutes after the last dictation, as
-  in Handy, and loaded again while you speak at the next one. **Unload the model from memory** on the Voice tab
-  offers right after dictation, 2, 5, 10 or 15 minutes, an hour, or never. Saving the settings no longer loads a
-  model that was freed, unless another model or the graphics card option was chosen.
-- On the graphics card, the first dictation's warm-up run (shader compilation) is not repeated when the model is
-  loaded again, since the compiled shaders stay in memory.
+  in Handy, and loaded again while you speak at the next one. **Unload the model from memory** in Settings → General
+  offers right after dictation, 2, 5, 10 or 15 minutes, an hour, or never. Saving the settings no longer loads a model
+  that was freed, unless another model or graphics card was chosen. On a graphics card, the warm-up run (shader
+  compilation) is not repeated when the model is loaded again, since the compiled shaders stay in memory.
+- Short phrases are recognized several times faster, which matters most on computers without a strong graphics card:
+  Whisper now processes only as much audio as the phrase takes instead of always 30 seconds. This is experimental
+  and can be turned off on the Voice tab ("Faster recognition of short phrases"), in case it recognizes worse.
+  Speech recognition also uses flash attention, which is faster and needs less graphics memory. Whisper tends to
+  repeat a phrase when it processes so little audio, so it now produces a single segment of limited length, and a
+  phrase repeated right after itself is pasted once.
+- The dictation indicator fades out the moment the text is pasted, instead of winking for most of a second after it.
+- Speech recognition uses one thread per processor core (up to 8) instead of one per logical processor: on a
+  processor with Hyper-Threading, two threads on the same core only compete for it. The log names the number of
+  threads.
+- On a graphics card, a short phrase is recognized about twice as fast: the working memory of speech recognition is
+  now set up once, when the model loads, instead of for every phrase, which took about half of the time.
+- On a separate graphics card with at least 4 GB of memory, speech recognition weighs five candidate transcriptions
+  instead of one (beam search), as whisper.cpp's own tool and OpenAI's Whisper do: fewer wrong letters and words, for
+  a fraction of a second. On the processor, a built-in graphics card or a smaller card it still takes the single most
+  likely one, since there the extra candidates would cost more than they are worth.
+
+### Added
+- **First steps**, a window for new users that opens at the first start and from the tray menu: where MovaCore lives,
+  the hotkey tried out on a word ("ghbdsn" becomes "привіт"), voice input turned on with a dictation key of your own
+  and its model downloading, how to keep the mouse icon in sight in the tray, and **Launch at Windows startup**
+  (suggested there).
+- Turning voice input on asks for the dictation key right away, in First steps and on the Voice tab: many compact
+  keyboards have no ScrollLock. Esc keeps the key as it is.
+- Hints at the right moment, each once a session: the hotkey pressed with nothing selected says to select the text
+  first; slow speech recognition says what could help (faster recognition of short phrases, the graphics card, its
+  driver, or a restart).
+- Switching from Processor only to a graphics card offers to restart MovaCore, since the card is used only after one.
+- **Last phrases** in the tray menu: the last 10 dictated phrases, pasted or not, where a click copies one again.
+  They stay in memory until MovaCore exits; **Remember the last dictated phrases after a restart** in Settings →
+  General (off by default) keeps them in a file on this computer, and turning it off deletes the file. When a phrase could not be
+  pasted, the indicator now says that the text is on the clipboard.
+- **Graphics card** on the Voice tab replaces "Use the graphics card (Vulkan)": **Automatic**, a card of your choice,
+  or **Processor only**. Automatic prefers a separate graphics card to one built into the processor: before, the
+  first card Vulkan listed was used, on a laptop often the slower built-in one. Switching between cards takes effect
+  at once; from Processor only to a card, after a restart.
+- The log names the graphics card that speech recognition runs on and how much memory it uses, to help find out why
+  recognition is slow on a given computer.
+- The build number under the version, at the top of the settings window and in About (for example "Build 57 ·
+  265ab8d · 2026-10-07"), and in the first line of the log, so that builds of one version can be told apart. It is
+  also the last part of the file version in the file's properties.
+
+### Fixed
+- Pressing the dictation key again right after a phrase was ignored while that phrase was still being recognized or
+  pasted, which the indicator no longer showed: what was said next was lost. The next phrase is now recorded at once,
+  and the phrases are pasted one after another, in order.
+- A dictated phrase was sometimes pasted twice, or followed by its own beginning: when Whisper hears silence after the
+  phrase, it can start over and recognize the phrase again. Such a repeat is now dropped. It happened with the
+  30-second window of 1.2.0 too, more often with the short one.
+- With "Use the graphics card" turned off when MovaCore started, the speech recognition runtime was left for
+  Whisper.net to pick, which could fail on computers without Vulkan.
 
 ## [1.2.0] - 2026-10-06
 

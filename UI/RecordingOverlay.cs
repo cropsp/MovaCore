@@ -14,8 +14,8 @@ namespace MovaCore.UI
     /// <summary>
     /// A small pill near the bottom of the screen with the field mouse from the logo (<see cref="MouseScene"/>): while
     /// recording it sits in grass that grows with the voice (grey and dozing until the microphone delivers sound);
-    /// while transcribing, if that takes a moment, it gnaws an ear of wheat; it winks when the text is pasted; and it
-    /// goes with short messages. It never takes the focus (the text must go to the window the user is typing in) and
+    /// while transcribing, if that takes a moment, it gnaws an ear of wheat; it fades out the moment the text is
+    /// pasted; and it goes with short messages. It never takes the focus (the text must go to the window the user is typing in) and
     /// lets clicks through. A layered window with per-pixel alpha (UpdateLayeredWindow) gives it the shape of a real
     /// capsule with smooth edges and a soft shadow, the same on Windows 10 and 11; WinForms painting and the Opacity
     /// property are not used, since SetLayeredWindowAttributes would stop UpdateLayeredWindow from working.
@@ -33,7 +33,7 @@ namespace MovaCore.UI
         private const float TextSize = 13.3f; // 10 pt
 
         private const double MaxOpacity = 0.94;
-        private const double FadeInMs = 120, FadeOutMs = 200;
+        private const double FadeInMs = 120, FadeOutMs = 150;
 
         /// <summary>A quick transcription shows no animation at all, only a slower one does.</summary>
         private const double ProcessingDelayMs = 300;
@@ -98,7 +98,6 @@ namespace MovaCore.UI
             Hidden,
             Recording,
             Transcribing,
-            Pasted,
             Message,
         }
 
@@ -125,8 +124,6 @@ namespace MovaCore.UI
         // The grass settles while it starts; the mouse gnaws its wheat only if it takes a moment
         public void ShowTranscribing() => Present(Mode.Transcribing, "", hideAfter: null);
 
-        /// <summary>A wink for the pasted text, then it fades out.</summary>
-        public void ShowPasted() => Present(Mode.Pasted, "", hideAfter: TimeSpan.FromSeconds(0.6));
 
         /// <param name="pose">How the mouse beside the message looks: puzzled when no speech was heard, and so on.</param>
         public void ShowMessage(string message, MouseScene.Pose pose = MouseScene.Pose.Calm)
@@ -288,7 +285,6 @@ namespace MovaCore.UI
             Mode.Transcribing => Stopwatch.GetElapsedTime(_modeStarted).TotalMilliseconds >= ProcessingDelayMs
                 ? MouseScene.Pose.Working
                 : MouseScene.Pose.Settling,
-            Mode.Pasted => MouseScene.Pose.Pasted,
             _ => _messagePose,
         };
 
